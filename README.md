@@ -44,7 +44,7 @@ $$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) 
 
 # Propagation Diagnostics
 ## Import Details
-Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration.
+Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration (will be changed later).
 
 ## Custom LIF vs PyGenn LIF Refactory Times
 ![Refactory Comparison](neuronFiringPlot.png)
