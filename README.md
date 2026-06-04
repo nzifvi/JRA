@@ -16,7 +16,9 @@ The angular difference on each ring, $\Delta \theta$, is the angle between adjac
 $$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
 
 Ultimately, this results in the WPSNN having the structure below:
-<img src="neuronLatticeStructure.png" width="50%"/>
+
+<img src="neuronLatticeStructure.png" width="60%"/>
+
 Where green arrows represent angular connections between neighbouring neurons, in blue, and red represent radial connections between neurons.
 Due to how radial outward neighbours are calculated, one neuron on ring i will only connect to one neuron on ring i+1. This means that there will be a subset
 of neurons on ring i+1 which can only be accessed by angular neighbours on ring i+1 rather than radial neighbours on ring i. This only occurs
