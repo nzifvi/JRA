@@ -15,6 +15,11 @@ The angular difference on each ring, $\Delta \theta$, is the angle between adjac
 
 $$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
 
+# Measurement Binning
+A LIDAR sensor will output a measurement vector, $\vec{z}$, which has 3 elements with a real number value.
+
+$$ \vec{z} = \begin{bmatrix}r \\ \theta \\ \phi \end{bmatrix}$$
+
 # Propagation Diagnostics
 ## Import Details
 Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration.
