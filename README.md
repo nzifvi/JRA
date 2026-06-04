@@ -20,6 +20,14 @@ A LIDAR sensor will output a measurement vector, $\vec{z}$, which has 3 elements
 
 $$ \vec{z} = \begin{bmatrix}r \\ \theta \\ \phi \end{bmatrix}$$
 
+The neuron lattice is a discrete structure. Therefore, continous measurements are made to correspond with neurons at discrete locations. This is done by binning the 3 
+measurements part of the measurement vector. This forms a binned equivalent of the measurements vector where each element is a number from a discrete domain defined by the 
+neuron lattice. The binned equivalents are calculated via...
+
+$$r_{binned} = round\bigg(\frac{r}{d}\bigg)$$
+
+$$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) \cdot \Delta \theta_{bin} bigg) mod 2\pi$$
+
 # Propagation Diagnostics
 ## Import Details
 Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration.
