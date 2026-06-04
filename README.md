@@ -18,7 +18,7 @@ $$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
 Ultimately, this results in the WPSNN having the structure below:
 <div align="center">
   <img src="neuronLatticeStructure.png" width="60%"/>
-<\div>
+</div>
 
 Where green arrows represent angular connections between neighbouring neurons, in blue, and red represent radial connections between neurons.
 Due to how radial outward neighbours are calculated, one neuron on ring i will only connect to one neuron on ring i+1. This means that there will be a subset
