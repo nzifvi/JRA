@@ -24,7 +24,7 @@ The neuron lattice is a discrete structure. Therefore, continous measurements ar
 measurements part of the measurement vector. This forms a binned equivalent of the measurements vector where each element is a number from a discrete domain defined by the 
 neuron lattice. The binned equivalents are calculated via...
 
-$$r_{binned} = round\bigg(\frac{r}{d}\bigg)$$
+$$r_{binned} = round\bigg(\frac{r}{d}\bigg) \cdot d$$
 
 $$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) \cdot \Delta \theta_{bin} \bigg) mod 2\pi$$
 
