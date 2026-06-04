@@ -26,7 +26,7 @@ neuron lattice. The binned equivalents are calculated via...
 
 $$r_{binned} = round\bigg(\frac{r}{d}\bigg)$$
 
-$$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) \cdot \Delta \theta_{bin} bigg) mod 2\pi$$
+$$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) \cdot \Delta \theta_{bin} \bigg) mod 2\pi$$
 
 # Propagation Diagnostics
 ## Import Details
