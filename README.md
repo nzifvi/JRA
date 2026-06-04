@@ -11,6 +11,9 @@ Arc-length scaling is used to determine the number of neurons to apply, per ring
 
 $$N(r) = ceil\bigg(\frac{2\pi r}{d}\bigg)$$
 
+The angular difference on each ring, $\Delta \theta$, is the angle between adjacent neurons on the same ring. The angular difference of ring r is defined as...
+
+$$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
 
 # Propagation Diagnostics
 ## Import Details
