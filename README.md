@@ -4,10 +4,10 @@
 ## Import Details
 Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration.
 
-### Custom LIF vs PyGenn LIF Refactory Times
+## Custom LIF vs PyGenn LIF Refactory Times
 ![Refactory Comparison](neuronFiringPlot.png)
 
-### Wavefront Propagation
+## Wavefront Propagation
 
 ### PyGenn LIF
 ![PyGenn LIF](plotWithDefaultLIF.png)
