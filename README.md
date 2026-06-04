@@ -15,6 +15,10 @@ The angular difference on each ring, $\Delta \theta$, is the angle between adjac
 
 $$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
 
+Ultimately, this results in the WPSNN having the structure below:
+![WPSNN Neuron Lattice Structure](exampleNeuronLattice.png)
+
+
 # Measurement Binning
 A LIDAR sensor will output a measurement vector, $\vec{z}$, which has 3 elements with a real number value.
 
