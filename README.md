@@ -16,7 +16,7 @@ The angular difference on each ring, $\Delta \theta$, is the angle between adjac
 $$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
 
 Ultimately, this results in the WPSNN having the structure below:
-![WPSNN Neuron Lattice Structure](exampleNeuronLattice.png)
+![WPSNN Neuron Lattice Structure](neuronLatticeStructure.png)
 
 
 # Measurement Binning
