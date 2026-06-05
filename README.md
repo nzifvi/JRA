@@ -1,5 +1,9 @@
-# WPSNN Architecture
-## Neuron Lattice
+# Relevant Links
+[Project Plan and Progress](https://trello.com/b/QE3CF7Dn/jra)
+
+# WPSNN
+## WPSNN Architecture
+### Neuron Lattice
 WPSNN is organised into a neuron lattice that exists in a spherical coordinate system space, of radius R, segmented by rings. The origin neuron is (0, 0).
 Each ring is defined using...
 
@@ -27,7 +31,7 @@ if ring i+1 is more dense than ring i.
 
 
 
-# Measurement Binning
+## Measurement Binning
 A LIDAR sensor will output a measurement vector, $\vec{z}$, which has 3 elements with a real number value.
 
 $$ \vec{z} = \begin{bmatrix}r \\ \theta \\ \phi \end{bmatrix}$$
@@ -42,17 +46,17 @@ $$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) 
 
 ... where $d$ is the neuron spacing and $\Delta \theta_{bin}$ is the thetaBinWidth. The thetaBinWidth controls the domain a bin covers. The modulo operation wraps values, at exist outside the boundary of a possible domain, back to the other side.
 
-# Propagation Diagnostics
+## Propagation Diagnostics
 ## Import Details
 Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration (will be changed later).
 
-## Custom LIF vs PyGenn LIF Refactory Times
+### Custom LIF vs PyGenn LIF Refactory Times
 ![Refactory Comparison](neuronFiringPlot.png)
 
-## Wavefront Propagation
+### Wavefront Propagation
 
-### PyGenn LIF
+#### PyGenn LIF
 ![PyGenn LIF](plotWithDefaultLIF.png)
 
-### Custom LIF
+#### Custom LIF
 ![Custom LIF](plotWithCustomLIF.png)
