@@ -58,7 +58,7 @@ EXPORT_FUNC void initializeHost();
 
 // Merged group upload functions
 EXPORT_FUNC void pushMergedNeuronInitGroup0ToDevice(unsigned int idx, float* Iinh, float* RefracTime, float* V, float* denDelayInSyn1, uint32_t* denDelayPtrInSyn1, float* outPostInSyn0, float* outPostInSyn1, uint32_t* spkCntSynSpike0, uint32_t* spkSynSpike0);
-EXPORT_FUNC void pushMergedNeuronInitGroup1ToDevice(unsigned int idx, uint32_t* endSpike, uint32_t* spkCntSynSpike0, uint32_t* spkSynSpike0, uint32_t* startSpike);
+EXPORT_FUNC void pushMergedNeuronInitGroup1ToDevice(unsigned int idx, uint32_t* spkCntSynSpike0, uint32_t* spkSynSpike0);
 EXPORT_FUNC void pushMergedNeuronUpdateGroup0ToDevice(unsigned int idx, float* Iinh, float* RefracTime, float* V, float* denDelayInSyn1, uint32_t* denDelayPtrInSyn1, float* outPostInSyn0, float* outPostInSyn1, uint32_t* recordSpk, uint32_t* spkCntSynSpike0, uint32_t* spkSynSpike0);
 EXPORT_FUNC void pushMergedNeuronUpdateGroup1ToDevice(unsigned int idx, uint32_t* endSpike, float* spikeTimes, uint32_t* spkCntSynSpike0, uint32_t* spkSynSpike0, uint32_t* startSpike);
 EXPORT_FUNC void pushMergedNeuronUpdate1spikeTimesToDevice(unsigned int idx, float* value);

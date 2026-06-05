@@ -15,10 +15,8 @@ struct MergedNeuronInitGroup0
 ;
 struct MergedNeuronInitGroup1
  {
-    uint32_t* __restrict endSpike;
     uint32_t* __restrict spkCntSynSpike0;
     uint32_t* __restrict spkSynSpike0;
-    uint32_t* __restrict startSpike;
     
 }
 ;
@@ -35,11 +33,9 @@ void pushMergedNeuronInitGroup0ToDevice(unsigned int idx, float* Iinh, float* Re
     mergedNeuronInitGroup0[idx].spkSynSpike0 = spkSynSpike0;
 }
 static MergedNeuronInitGroup1 mergedNeuronInitGroup1[1];
-void pushMergedNeuronInitGroup1ToDevice(unsigned int idx, uint32_t* endSpike, uint32_t* spkCntSynSpike0, uint32_t* spkSynSpike0, uint32_t* startSpike) {
-    mergedNeuronInitGroup1[idx].endSpike = endSpike;
+void pushMergedNeuronInitGroup1ToDevice(unsigned int idx, uint32_t* spkCntSynSpike0, uint32_t* spkSynSpike0) {
     mergedNeuronInitGroup1[idx].spkCntSynSpike0 = spkCntSynSpike0;
     mergedNeuronInitGroup1[idx].spkSynSpike0 = spkSynSpike0;
-    mergedNeuronInitGroup1[idx].startSpike = startSpike;
 }
 void initializeHost() {
 }
@@ -93,21 +89,7 @@ void initialize() {
         // merged neuron init group 1
         for(unsigned int g = 0; g < 1; g++) {
             const auto *group = &mergedNeuronInitGroup1[g]; 
-             {
-                for (unsigned int i = 0; i < ((1u)); i++) {
-                    uint32_t initVal;
-                    initVal = (0.000000000e+00f);
-                    group->startSpike[i] = initVal;
-                }
-            }
-             {
-                for (unsigned int i = 0; i < ((1u)); i++) {
-                    uint32_t initVal;
-                    initVal = (1.000000000e+00f);
-                    group->endSpike[i] = initVal;
-                }
-            }
-            for (unsigned int i = 0; i < ((1u)); i++) {
+            for (unsigned int i = 0; i < ((341u)); i++) {
                 group->spkSynSpike0[i] = 0;
             }
             group->spkCntSynSpike0[0] = 0;

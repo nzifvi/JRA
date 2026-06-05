@@ -133,7 +133,7 @@ void updateNeurons(float t, unsigned int recordingTimestep) {
         for(unsigned int g = 0; g < 1; g++) {
             const auto *group = &mergedNeuronUpdateGroup1[g]; 
             
-            for(unsigned int i = 0; i < (1u); i++) {
+            for(unsigned int i = 0; i < (341u); i++) {
                 uint32_t _lstartSpike = group->startSpike[i];
                 const uint32_t _lendSpike = group->endSpike[i];
                 // test whether spike condition was fulfilled previously

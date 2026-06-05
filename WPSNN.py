@@ -44,6 +44,7 @@ class WPSNN:
         self.model    = pygenn.GeNNModel("float", "WPSNN")
         self.model.dt = 1.0
 
+        self.path                       = None
         self.sphericalCoordinateLattice = self._initSphericalCoordinateLattice()
         self.indexTable                 = self._initIndexTable()
         self.ringTable                  = self._initRingTable()
@@ -71,15 +72,6 @@ class WPSNN:
             self.lifParameters,
             self.lifInit
         )
-        """
-        self.neurons = self.model.add_neuron_population(
-            "Neurons",
-            len(self.sphericalCoordinateLattice),
-            "LIF",
-            params = self.lifParameters,
-            vars = self.lifInit,
-        )
-        """
         self.neurons.spike_recording_enabled = True
 
         preIndices, postIndices, weights, delays = zip(*self.connList)
@@ -106,11 +98,22 @@ class WPSNN:
 
 
         self.stim = self.model.add_neuron_population(
-            "Stim", 1,
-            "SpikeSourceArray", {},
-            {"startSpike": 0, "endSpike": 1}
+            "Stim",
+            len(self.sphericalCoordinateLattice),
+            "SpikeSourceArray",
+            {},
+            {
+                "startSpike" : numpy.zeros(len(self.sphericalCoordinateLattice), dtype = numpy.uint32),
+                "endSpike"   : numpy.zeros(len(self.sphericalCoordinateLattice), dtype = numpy.uint32)
+            }
         )
-        self.stim.extra_global_params["spikeTimes"].set_init_values([2.0])
+        self.stim.extra_global_params["spikeTimes"].set_init_values(
+            numpy.full(
+                len(self.sphericalCoordinateLattice),
+                numpy.finfo(numpy.float32).max,
+                dtype = numpy.float32
+            )
+        )
         self.stimSynapses = self.model.add_synapse_population(
             "StimSynapses",
             "SPARSE",
@@ -118,16 +121,17 @@ class WPSNN:
             self.neurons,
             pygenn.init_weight_update(
                 "StaticPulseConstantWeight",
-                {
-                    "g": 300.0
-                }
+                {"g" : float(self.currentClamp)}
             ),
             pygenn.init_postsynaptic(
                 "ExpCurr",
                 {"tau" : 5.0}
             )
         )
-        self.stimSynapses.set_sparse_connections([0], [0])
+        self.stimSynapses.set_sparse_connections(
+            list(range(len(self.sphericalCoordinateLattice))),
+            list(range(len(self.sphericalCoordinateLattice))),
+        )
 
         self.model.build()
         self.model.load(num_recording_timesteps=self.duration)
@@ -215,22 +219,95 @@ class WPSNN:
         return rBinned, thetaBinned, phiBinned
 
     def inject(self, r, theta, phi=None):
-        pass
+        rBinned, thetaBinned, _ = self._bin(r, theta, phi)
+        if (rBinned, thetaBinned) not in self.indexTable:
+            raise ValueError(
+                f"Access attempt for non-existent neuron at binned coordinate (r={rBinned}, theta={thetaBinned})"
+            )
+
+        i = self.indexTable[(rBinned, thetaBinned)]
+
+        self.stim.extra_global_params["spikeTimes"].pull_from_device()
+        self.stim.extra_global_params["spikeTimes"].view[i] = self.model.t + 2.0
+        self.stim.extra_global_params["spikeTimes"].push_to_device()
+
+        self.stim.vars["startSpike"].pull_from_device()
+        self.stim.vars["endSpike"].pull_from_device()
+        self.stim.vars["startSpike"].view[i] = i
+        self.stim.vars["endSpike"].view[i] = i + 1
+        self.stim.vars["startSpike"].push_to_device()
+        self.stim.vars["endSpike"].push_to_device()
 
     def step(self):
         self.model.step_time()
 
-    def propagateWave(self):
-        currentTime = self.model.t
-        self.stim.extra_global_params["spikeTimes"].view[0] = currentTime + 2.0
-        self.stim.extra_global_params["spikeTimes"].push_to_device()
-        self.stim.vars["startSpike"].view[0] = 0
-        self.stim.vars["endSpike"].view[0] = 1
+    def propagateWave(self): # EGOCENTRIC IMPLEMENTATION (always initiates from origin)
+        self.inject(0.0, 0.0)
+
+    def backpropagateWave(self, targetR, targetTheta, targetPhi=None):
+        self.model.pull_recording_buffers_from_device()
+        times, indices = self.neurons.spike_recording_data[0]
+
+        firstSpike = {}
+        for t, i in zip(times, indices):
+            i = int(i)
+            if i not in firstSpike or t < firstSpike[i]:
+                firstSpike[i] = t
+
+        rBinned, thetaBinned, _ = self._bin(targetR, targetTheta, targetPhi)
+        targetNeuronKey = (rBinned, thetaBinned)
+        targetIndex = self.indexTable[targetNeuronKey]
+
+        if targetIndex not in firstSpike:
+            raise RuntimeError(
+                f"Wavefront did not reach target neuron at binned coordinate (r={rBinned}, theta = {thetaBinned})"
+            )
+
+        self.path = []
+        currentIndex = targetIndex
+        originIndex = self.indexTable[(0.0, 0.0)]
+        maxTime = self.duration
+
+        while currentIndex != originIndex:
+            self.path.append(currentIndex)
+
+            neighbours = self.neighbourTable.get(currentIndex, [])
+            best, bestTime = None, maxTime
+            for neighbour in neighbours:
+                if neighbour in firstSpike and firstSpike[neighbour] < bestTime:
+                    bestTime = firstSpike[neighbour]
+                    best     = neighbour
+
+            if best is None:
+                break
+
+            maxTime      = bestTime
+            currentIndex = best
+
+        self.path.append(originIndex)
+
+    def calculatePath(self):
+        if self.path is None:
+            raise RuntimeError(
+                "Path has not been calculated via a call to WPSNN.backpropagateWave() function member"
+            )
+
+        return list(
+            reversed(
+                self.path
+            )
+        )
+
+    def resetWaveProp(self):
+        n = len(self.sphericalCoordinateLattice)
+        self.stim.vars["startSpike"].view[:] = numpy.zeros(n, dtype=numpy.uint32)
+        self.stim.vars["endSpike"].view[:] = numpy.zeros(n, dtype=numpy.uint32)
         self.stim.vars["startSpike"].push_to_device()
         self.stim.vars["endSpike"].push_to_device()
 
-    def backpropagateWave(self, targetR, targetTheta, targetPhi=None):
-        pass
+        self.stim.extra_global_params["spikeTimes"].view[:] = numpy.full(n, numpy.finfo(numpy.float32).max,
+                                                                         dtype=numpy.float32)
+        self.stim.extra_global_params["spikeTimes"].push_to_device()
 
-    def reset(self):
-        pass
+        self.model.timestep = 0
+        self.path = None
