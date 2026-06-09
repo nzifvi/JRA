@@ -47,39 +47,39 @@ void initialize() {
         for(unsigned int g = 0; g < 1; g++) {
             const auto *group = &mergedNeuronInitGroup0[g]; 
              {
-                for (unsigned int i = 0; i < ((341u)); i++) {
+                for (unsigned int i = 0; i < ((5025u)); i++) {
                     float initVal;
                     initVal = (-6.500000000e+01f);
                     group->V[i] = initVal;
                 }
             }
              {
-                for (unsigned int i = 0; i < ((341u)); i++) {
+                for (unsigned int i = 0; i < ((5025u)); i++) {
                     float initVal;
                     initVal = (0.000000000e+00f);
                     group->RefracTime[i] = initVal;
                 }
             }
              {
-                for (unsigned int i = 0; i < ((341u)); i++) {
+                for (unsigned int i = 0; i < ((5025u)); i++) {
                     float initVal;
                     initVal = (0.000000000e+00f);
                     group->Iinh[i] = initVal;
                 }
             }
-            for (unsigned int i = 0; i < ((341u)); i++) {
+            for (unsigned int i = 0; i < ((5025u)); i++) {
                 group->spkSynSpike0[i] = 0;
             }
             group->spkCntSynSpike0[0] = 0;
-            for (unsigned int i = 0; i < ((341u)); i++) {
+            for (unsigned int i = 0; i < ((5025u)); i++) {
                 group->outPostInSyn0[i] = 0.000000000e+00f;
             }
-            for (unsigned int i = 0; i < ((341u)); i++) {
+            for (unsigned int i = 0; i < ((5025u)); i++) {
                 group->outPostInSyn1[i] = 0.000000000e+00f;
             }
-            for (unsigned int i = 0; i < ((341u)); i++) {
-                for(unsigned int d = 0; d < 8; d++) {
-                    group->denDelayInSyn1[(d * (341u)) + i] = 0.000000000e+00f;
+            for (unsigned int i = 0; i < ((5025u)); i++) {
+                for(unsigned int d = 0; d < 2; d++) {
+                    group->denDelayInSyn1[(d * (5025u)) + i] = 0.000000000e+00f;
                 }
             }
             *group->denDelayPtrInSyn1 = 0;
@@ -89,7 +89,7 @@ void initialize() {
         // merged neuron init group 1
         for(unsigned int g = 0; g < 1; g++) {
             const auto *group = &mergedNeuronInitGroup1[g]; 
-            for (unsigned int i = 0; i < ((341u)); i++) {
+            for (unsigned int i = 0; i < ((5025u)); i++) {
                 group->spkSynSpike0[i] = 0;
             }
             group->spkCntSynSpike0[0] = 0;

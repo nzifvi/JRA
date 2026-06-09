@@ -56,7 +56,7 @@ void updateSynapses(float t) {
     // merged synapse dendritic delay update group 0
     for(unsigned int g = 0; g < 1; g++) {
         const auto *group = &mergedSynapseDendriticDelayUpdateGroup0[g]; 
-        *group->denDelayPtr = (*group->denDelayPtr + 1) % 8;
+        *group->denDelayPtr = (*group->denDelayPtr + 1) % 2;
     }
      {
         // merged presynaptic update group 0
@@ -85,9 +85,9 @@ void updateSynapses(float t) {
                 const unsigned int idPre = group->srcSpk[i];
                 const unsigned int npost = group->rowLength[idPre];
                 for (unsigned int j = 0; j < npost; j++) {
-                    const uint32_t idSyn = ((uint32_t)idPre * (6u)) + j;
+                    const uint32_t idSyn = ((uint32_t)idPre * (8u)) + j;
                     const unsigned int idPost = group->ind[idSyn];
-                    group->denDelay[(((*group->denDelayPtr + group->d[idSyn]) % 8) * (341u)) + idPost] += group->g[idSyn];
+                    group->denDelay[(((*group->denDelayPtr + group->d[idSyn]) % 2) * (5025u)) + idPost] += group->g[idSyn];
                 }
             }
         }

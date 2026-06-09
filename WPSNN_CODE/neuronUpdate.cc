@@ -74,10 +74,10 @@ void updateNeurons(float t, unsigned int recordingTimestep) {
         // merged neuron update group 0
         for(unsigned int g = 0; g < 1; g++) {
             const auto *group = &mergedNeuronUpdateGroup0[g]; 
-            const unsigned int numRecordingWords = ((341u) + 31) / 32;
+            const unsigned int numRecordingWords = ((5025u) + 31) / 32;
             std::fill_n(&group->recordSpk[recordingTimestep * numRecordingWords], numRecordingWords, 0);
             
-            for(unsigned int i = 0; i < (341u); i++) {
+            for(unsigned int i = 0; i < (5025u); i++) {
                 float Isyn = 0;
                 float _lV = group->V[i];
                 float _lIinh = group->Iinh[i];
@@ -92,7 +92,7 @@ void updateNeurons(float t, unsigned int recordingTimestep) {
                  {
                     // postsynaptic model 1
                     float linSyn = group->outPostInSyn1[i];
-                    float *denDelayFront = &group->denDelayInSyn1[(*group->denDelayPtrInSyn1 * (341u)) + i];
+                    float *denDelayFront = &group->denDelayInSyn1[(*group->denDelayPtrInSyn1 * (5025u)) + i];
                     linSyn += *denDelayFront;
                     *denDelayFront = 0.000000000e+00f;
                     Isyn += (9.063462346e-01f) * linSyn;
@@ -109,7 +109,7 @@ void updateNeurons(float t, unsigned int recordingTimestep) {
                  {
                     float _dV = (-(_lV - (-6.500000000e+01f)) + Isyn + (0.000000000e+00f) - _lIinh) / (2.000000000e+01f);
                     _lV += _dV * 1.000000000e+00f;
-                    _lIinh -= (_lIinh / (1.000000000e+03f)) * 1.000000000e+00f;
+                    _lIinh -= (_lIinh / (1.000000000e+02f)) * 1.000000000e+00f;
                 }
                 
                 // test for and register a true spike
@@ -133,7 +133,7 @@ void updateNeurons(float t, unsigned int recordingTimestep) {
         for(unsigned int g = 0; g < 1; g++) {
             const auto *group = &mergedNeuronUpdateGroup1[g]; 
             
-            for(unsigned int i = 0; i < (341u); i++) {
+            for(unsigned int i = 0; i < (5025u); i++) {
                 uint32_t _lstartSpike = group->startSpike[i];
                 const uint32_t _lendSpike = group->endSpike[i];
                 // test whether spike condition was fulfilled previously
