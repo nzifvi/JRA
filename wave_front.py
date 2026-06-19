@@ -1,4 +1,4 @@
-from WPSNN import WPSNN
+from HESCC import WPSNN
 import numpy
 import matplotlib.pyplot as plt
 
