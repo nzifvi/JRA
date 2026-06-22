@@ -1,62 +1,12 @@
 # Relevant Links
 [Project Plan and Progress](https://trello.com/b/QE3CF7Dn/jra)
 
-# WPSNN
-## WPSNN Architecture
-### Neuron Lattice
-WPSNN is organised into a neuron lattice that exists in a spherical coordinate system space, of radius R, segmented by rings. The origin neuron is (0, 0).
-Each ring is defined using...
+# Biological Motivation
 
-$$r = i \cdot d$$
+# Neuron Populations
 
-...where $d$ is neuronSpacing and i is a natural number with bounded between [0, ceil(R/d)]
+## Egocentric Segment Neuron Populations
 
-Arc-length scaling is used to determine the number of neurons to apply, per ring, to ensure uniform density across all rings. The number of neurons on ring r, N(r), is defined as...
+## Allocentric Segment Neuron Populations
 
-$$N(r) = ceil\bigg(\frac{2\pi r}{d}\bigg)$$
-
-The angular difference on each ring, $\Delta \theta$, is the angle between adjacent neurons on the same ring. The angular difference of ring r is defined as...
-
-$$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
-
-Ultimately, this results in the WPSNN having the structure below:
-<div align="center">
-  <img src="neuronLatticeStructure.png" width="60%"/>
-</div>
-
-Where green arrows represent angular connections between neighbouring neurons, in blue, and red represent radial connections between neurons.
-Due to how radial outward neighbours are calculated, one neuron on ring i will only connect to one neuron on ring i+1. This means that there will be a subset
-of neurons on ring i+1 which can only be accessed by angular neighbours on ring i+1 rather than radial neighbours on ring i. This only occurs
-if ring i+1 is more dense than ring i.
-
-
-
-## Measurement Binning
-A LIDAR sensor will output a measurement vector, $\vec{z}$, which has 3 elements with a real number value.
-
-$$ \vec{z} = \begin{bmatrix}r \\ \theta \\ \phi \end{bmatrix}$$
-
-The neuron lattice is a discrete structure. Therefore, continous measurements are made to correspond with neurons at discrete locations. This is done by binning the 3 
-measurements part of the measurement vector. This forms a binned equivalent of the measurements vector where each element is a number from a discrete domain defined by the 
-neuron lattice. The binned equivalents are calculated via...
-
-$$r_{binned} = round\bigg(\frac{r}{d}\bigg) \cdot d$$
-
-$$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) \cdot \Delta \theta_{bin} \bigg) mod 2\pi$$
-
-... where $d$ is the neuron spacing and $\Delta \theta_{bin}$ is the thetaBinWidth. The thetaBinWidth controls the domain a bin covers. The modulo operation wraps values, at exist outside the boundary of a possible domain, back to the other side.
-
-## Propagation Diagnostics
-## Import Details
-Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration (will be changed later).
-
-### Custom LIF vs PyGenn LIF Refactory Times
-![Refactory Comparison](neuronFiringPlot.png)
-
-### Wavefront Propagation
-
-#### PyGenn LIF
-![PyGenn LIF](plotWithDefaultLIF.png)
-
-#### Custom LIF
-![Custom LIF](plotWithCustomLIF.png)
+## Transformation Circuit Segment Neuron Populations
