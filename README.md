@@ -10,3 +10,6 @@
 ## Allocentric Segment Neuron Populations
 
 ## Transformation Circuit Segment Neuron Populations
+
+# Injection Mechanism
+
