@@ -1,504 +1,326 @@
 import numpy
+import time
+import threading
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from matplotlib.patches import FancyArrowPatch
-import time
 
-from HESCC import (HESCC, ENV_SIZE, NEURON_SPACING, PLACE_SIDE, CURRENT_CLAMP,
-                   BVC_AMOUNT, OVC_AMOUNT, HD_CELL_AMOUNT, GRID_CELL_AMOUNT,
-                   GRID_SIDE, SPEED_CELL_AMOUNT, PHI_BIN_AMOUNT, DISTANCE_BIN_AMOUNT)
-from LIDARInterface import LiDARInterface
+from HESCC import (HESCC, DISTANCE_BINS, EGOCENTRIC_BEARING_BINS,
+                   ALLOCENTRIC_BEARING_BINS, HDC_COUNT, LIDAR_RANGE)
 
-# ── Pipeline constants ────────────────────────────────────────────────────────
-UPDATE_INTERVAL_MS = 5
-PERSISTENCE_TAU    = 5
-PERSISTENCE_DECAY  = 1
-SERIAL_PORT        = "COM5"
-SERIAL_BAUD        = 115200
-CLV_SCALE          = 50.0
-CLV_MIN_DUTY       = 60
-CLV_MAX_DUTY       = 200
+STEPS_PER_FRAME = 20                   # HESCC steps per animation frame (sim runs faster than redraw)
+MOVE_SPEED      = 0.25                 # metres per key press (W/S)
+TURN_SPEED      = numpy.radians(8.0)   # radians per key press (A/D)
+WORLD_HALF      = 7.0                  # half-extent of the displayed world (m)
+
+CAMERA_FOV_H   = numpy.radians(87.0)    # D435 horizontal depth FOV
+CAMERA_COLUMNS = 64                     # simulated depth columns (downsampled)
+CAMERA_MIN_Z   = 0.105                  # D435 minimum depth distance (m)
+CAMERA_MAX_Z   = LIDAR_RANGE            # cap at the PWb/PWo distance grid range
+CAMERA_FPS     = 30                     # D435 depth stream frame rate
+CAMERA_MAX_AGE = 0.5                    # seconds before a frame is considered stale
 
 
-class HESCCPipelineVisualiser:
-    """
-    Live pipeline visualiser for HESCC + LD06 LiDAR.
+class World:
+    def __init__(self):
+        self.segments = []   # list of (x1, y1, x2, y2, kind)
+        w = 6.0
+        self._addBox(-w, -w, w, w, kind="boundary")          # outer room walls
+        self._addBox(2.0, 2.0, 3.5, 3.5, kind="object")      # free-standing boxes
+        self._addBox(-4.0, 1.0, -3.0, 2.0, kind="object")
+        self._addBox(0.5, -4.0, 2.0, -2.5, kind="object")
 
-    Layout
-    ------
-    Left panel — each neuron population displayed as a live activity plot,
-    arranged to mirror the actual network connectivity.  Arrows between
-    populations follow the synaptic pathways defined in HESCC.__init__.
+    def _addBox(self, x1, y1, x2, y2, kind):
+        self.segments.append((x1, y1, x2, y1, kind))
+        self.segments.append((x2, y1, x2, y2, kind))
+        self.segments.append((x2, y2, x1, y2, kind))
+        self.segments.append((x1, y2, x1, y1, kind))
 
-    Right panel — full Spatial Map imshow (PLACE_SIDE × PLACE_SIDE) with
-    decoded position and heading overlaid.
+    def cast(self, ox, oy, angle, maxRange):
+        dx, dy = numpy.cos(angle), numpy.sin(angle)
+        best_t, best_kind = None, None
+        for (x1, y1, x2, y2, kind) in self.segments:
+            ex, ey = x2 - x1, y2 - y1
+            denom = dx * ey - dy * ex
+            if abs(denom) < 1e-12:
+                continue
+            t = ((x1 - ox) * ey - (y1 - oy) * ex) / denom
+            u = ((x1 - ox) * dy - (y1 - oy) * dx) / denom
+            if t >= 0.0 and 0.0 <= u <= 1.0 and t <= maxRange:
+                if best_t is None or t < best_t:
+                    best_t, best_kind = t, kind
+        return best_t, best_kind
 
-    Population displays
-    -------------------
-    Speed Input / Speed Cells  — line plot of firingRate / V−Vrest
-    HD Input    / HD Cells     — line plot over preferred angle (0–2π)
-    Grid Cells                 — imshow  (GRID_CELL_AMOUNT//GRID_SIDE) × GRID_SIDE
-    BVC                        — imshow  PHI_BIN_AMOUNT × DISTANCE_BIN_AMOUNT
-    OVC                        — imshow  PHI_BIN_AMOUNT × DISTANCE_BIN_AMOUNT
-    Spatial Map                — imshow  PLACE_SIDE × PLACE_SIDE
 
-    Arrows
-    ------
-    Drawn once in figure-fraction coordinates after the first canvas render
-    so that axes positions are finalised.  Colours match the pathway type:
-      cyan   — speed pathway
-      amber  — head-direction pathway
-      purple — path integration (grid → place)
-      green  — BVC → SpatialMap  (Oja, boundary cues)
-      coral  — OVC → SpatialMap  (Oja, object cues)
+class Robot:
+    def __init__(self, x=0.0, y=0.0, heading=0.0):
+        self.x = x
+        self.y = y
+        self.heading = heading   # radians, allocentric
 
-    LiDAR pipeline
-    --------------
-    Unchanged from the original HESCCVisualiser: each animation frame drains
-    the latest complete revolution, classifies hits via the persistence filter,
-    and injects into BVC or OVC populations.  CLV duty is computed and sent
-    back to the ESP32 over serial.
-    """
+    def forward(self, dist):
+        self.x += dist * numpy.cos(self.heading)
+        self.y += dist * numpy.sin(self.heading)
 
+    def rotate(self, dAngle):
+        self.heading = (self.heading + dAngle) % (2 * numpy.pi)
+
+
+class SimulatedDepthCamera:
+    def __init__(self, world, robot):
+        self.world = world
+        self.robot = robot
+        self._columnOffsets = numpy.linspace(
+            -CAMERA_FOV_H / 2.0, CAMERA_FOV_H / 2.0, CAMERA_COLUMNS
+        )
+        self._frame = []
+        self._frameTimestamp = 0.0
+        self._lock = threading.Lock()
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._reader, daemon=True)
+        self._thread.start()
+        print(f"[SimulatedDepthCamera] started @ {CAMERA_FPS} fps")
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1.0)
+        print("[SimulatedDepthCamera] stopped")
+
+    def latest_frame(self, maxAge=CAMERA_MAX_AGE):
+        with self._lock:
+            if time.time() - self._frameTimestamp > maxAge:
+                return []
+            return list(self._frame)
+
+    def _reader(self):
+        period = 1.0 / CAMERA_FPS
+        while self._running:
+            frame = self._renderFrame()
+            with self._lock:
+                self._frame = frame
+                self._frameTimestamp = time.time()
+            time.sleep(period)   # emulate the depth-stream frame interval
+
+    def _renderFrame(self):
+        rx, ry, rh = self.robot.x, self.robot.y, self.robot.heading
+        hits = []
+        for offset in self._columnOffsets:
+            worldAngle = rh + offset
+            dist, kind = self.world.cast(rx, ry, worldAngle, CAMERA_MAX_Z)
+            if dist is None or dist < CAMERA_MIN_Z:
+                continue
+            egoBearing = offset % (2.0 * numpy.pi)   # bearing relative to nose
+            hits.append((dist, egoBearing, kind))
+        return hits
+
+
+class RobotSimVisualiser:
     VREST = -65.0
-    VMAX  = 15.0      # Vthresh − Vrest = −50 − (−65) = 15 mV
+    VMAX  = 15.0    # Vthresh - Vrest
 
-    # ── colour palette for pathways ──────────────────────────────────────────
-    C_SPEED = "#00ccff"
-    C_HD    = "#ff9900"
-    C_GRID  = "#aa88ff"
-    C_BVC   = "#44ff88"
-    C_OVC   = "#ff6644"
-
-    def __init__(self, network: HESCC, lidar: LiDARInterface):
-        self.network  = network
-        self.lidar    = lidar
-        self.running  = True
+    def __init__(self, network: HESCC, camera: SimulatedDepthCamera):
+        self.network = network
+        self.camera  = camera
+        self.world   = camera.world
+        self.robot   = camera.robot
+        self.running = True
         self.timestep = 0
 
-        # ── persistence filter state ─────────────────────────────────────
-        self._persistenceGrid   = numpy.zeros(
-            (PLACE_SIDE, PLACE_SIDE), dtype=numpy.int32
-        )
-        self._observedThisCycle = numpy.zeros(
-            (PLACE_SIDE, PLACE_SIDE), dtype=bool
-        )
-
-        # ── figure ────────────────────────────────────────────────────────
-        self.fig = plt.figure(figsize=(22, 11))
+        # ── figure layout ─────────────────────────────────────────────────
+        self.fig = plt.figure(figsize=(20, 10))
         self.fig.patch.set_facecolor("#0d0d1a")
-        self.fig.suptitle(
-            "HESCC — Live Pipeline Monitor",
-            color="white", fontsize=13, y=0.99
+        self.fig.suptitle("HESCC Robot Simulator  —  W/S move · A/D rotate · space pause",
+                          color="white", fontsize=13, y=0.99)
+
+        self.axWorld = self._makeAx([0.04, 0.08, 0.42, 0.84], "Simulated World (top-down)")
+        self.axWorld.set_aspect("equal")
+        self.axWorld.set_xlim(-WORLD_HALF, WORLD_HALF)
+        self.axWorld.set_ylim(-WORLD_HALF, WORLD_HALF)
+
+        self.axPWb, self.meshPWb = self._makePolar([0.52, 0.55, 0.20, 0.37],
+                                                   "PWb (egocentric boundaries)",
+                                                   EGOCENTRIC_BEARING_BINS, "viridis")
+        self.axPWo, self.meshPWo = self._makePolar([0.76, 0.55, 0.20, 0.37],
+                                                   "PWo (egocentric objects)",
+                                                   EGOCENTRIC_BEARING_BINS, "viridis")
+        self.axBVC, self.meshBVC = self._makePolar([0.52, 0.05, 0.20, 0.37],
+                                                   "BVC (allocentric boundaries)",
+                                                   ALLOCENTRIC_BEARING_BINS, "plasma")
+        self.axOVC, self.meshOVC = self._makePolar([0.76, 0.05, 0.20, 0.37],
+                                                   "OVC (allocentric objects)",
+                                                   ALLOCENTRIC_BEARING_BINS, "plasma")
+
+        self.axHDC = self._makeAx([0.52, 0.46, 0.44, 0.05], "HDC (heading bump)")
+        self.lineHDC, = self.axHDC.plot(
+            numpy.arange(HDC_COUNT), numpy.zeros(HDC_COUNT),
+            color="#ff9900", lw=1.2
         )
+        self.axHDC.set_ylim(0, self.VMAX)
+        self.axHDC.set_xlim(0, HDC_COUNT - 1)
 
-        # ── population axes (left panel) ──────────────────────────────────
-        #   [left, bottom, width, height]  in figure-fraction coordinates
-        self.axSpeedIn = self._makeAx([0.02, 0.84, 0.08, 0.11], "Speed Input")
-        self.axSpeed   = self._makeAx([0.13, 0.84, 0.08, 0.11], "Speed Cells")
-        self.axHDIn    = self._makeAx([0.02, 0.58, 0.08, 0.20], "HD Input")
-        self.axHD      = self._makeAx([0.13, 0.58, 0.08, 0.20], "HD Cells")
-        self.axGrid    = self._makeAx([0.24, 0.56, 0.12, 0.34], "Grid Cells")
-        self.axBVC     = self._makeAx([0.02, 0.28, 0.17, 0.24], "BVC")
-        self.axOVC     = self._makeAx([0.02, 0.02, 0.17, 0.24], "OVC")
+        for (x1, y1, x2, y2, kind) in self.world.segments:
+            colour = "#8888aa" if kind == "boundary" else "#ff6644"
+            self.axWorld.plot([x1, x2], [y1, y2], color=colour, lw=2, zorder=1)
 
-        # ── spatial map axis (right panel) ────────────────────────────────
-        self.axSMap = self._makeAx([0.42, 0.03, 0.54, 0.93], "Spatial Map")
-
-        # ── Speed Input: firingRate line ──────────────────────────────────
-        self.lineSpeedIn, = self.axSpeedIn.plot(
-            numpy.arange(SPEED_CELL_AMOUNT),
-            numpy.zeros(SPEED_CELL_AMOUNT),
-            color=self.C_SPEED, lw=0.8
-        )
-        self.axSpeedIn.set_ylim(0, 110)
-        self.axSpeedIn.set_xlim(0, SPEED_CELL_AMOUNT - 1)
-        self.axSpeedIn.set_ylabel("Hz", color="grey", fontsize=6)
-
-        # ── Speed Cells: V−Vrest line ────────────────────────────────────
-        self.lineSpeed, = self.axSpeed.plot(
-            numpy.arange(SPEED_CELL_AMOUNT),
-            numpy.zeros(SPEED_CELL_AMOUNT),
-            color=self.C_SPEED, lw=0.8
-        )
-        self.axSpeed.set_ylim(0, self.VMAX)
-        self.axSpeed.set_xlim(0, SPEED_CELL_AMOUNT - 1)
-        self.axSpeed.set_ylabel("mV", color="grey", fontsize=6)
-
-        # ── HD Input: firingRate over preferred angle ─────────────────────
-        hdAngles = network._hdCoords
-        self.lineHDIn, = self.axHDIn.plot(
-            hdAngles, numpy.zeros(HD_CELL_AMOUNT),
-            color=self.C_HD, lw=0.8
-        )
-        self.axHDIn.set_ylim(0, 110)
-        self.axHDIn.set_xlim(0, 2 * numpy.pi)
-        self.axHDIn.set_xticks([0, numpy.pi, 2 * numpy.pi])
-        self.axHDIn.set_xticklabels(["0", "π", "2π"], color="grey", fontsize=6)
-        self.axHDIn.set_ylabel("Hz", color="grey", fontsize=6)
-
-        # ── HD Cells: V−Vrest over preferred angle ────────────────────────
-        self.lineHD, = self.axHD.plot(
-            hdAngles, numpy.zeros(HD_CELL_AMOUNT),
-            color=self.C_HD, lw=0.8
-        )
-        self.axHD.set_ylim(0, self.VMAX)
-        self.axHD.set_xlim(0, 2 * numpy.pi)
-        self.axHD.set_xticks([0, numpy.pi, 2 * numpy.pi])
-        self.axHD.set_xticklabels(["0", "π", "2π"], color="grey", fontsize=6)
-        self.axHD.set_ylabel("mV", color="grey", fontsize=6)
-
-        # ── Grid Cells: imshow (GRID_CELL_AMOUNT//GRID_SIDE) × GRID_SIDE ──
-        _gridRows = GRID_CELL_AMOUNT // GRID_SIDE
-        self.imGrid = self.axGrid.imshow(
-            numpy.zeros((_gridRows, GRID_SIDE)),
-            aspect="auto", cmap="plasma",
-            vmin=0, vmax=self.VMAX, origin="lower"
-        )
-        self.fig.colorbar(
-            self.imGrid, ax=self.axGrid, fraction=0.046, pad=0.04
-        ).ax.tick_params(labelsize=6, colors="grey")
-
-        # ── BVC: imshow PHI_BIN_AMOUNT × DISTANCE_BIN_AMOUNT ─────────────
-        self.imBVC = self.axBVC.imshow(
-            numpy.zeros((PHI_BIN_AMOUNT, DISTANCE_BIN_AMOUNT)),
-            aspect="auto", cmap="viridis",
-            vmin=0, vmax=self.VMAX, origin="lower"
-        )
-        self.axBVC.set_xlabel("distance bin", color="grey", fontsize=6)
-        self.axBVC.set_ylabel("φ bin",         color="grey", fontsize=6)
-        self.fig.colorbar(
-            self.imBVC, ax=self.axBVC, fraction=0.046, pad=0.04
-        ).ax.tick_params(labelsize=6, colors="grey")
-
-        # ── OVC: imshow PHI_BIN_AMOUNT × DISTANCE_BIN_AMOUNT ─────────────
-        self.imOVC = self.axOVC.imshow(
-            numpy.zeros((PHI_BIN_AMOUNT, DISTANCE_BIN_AMOUNT)),
-            aspect="auto", cmap="viridis",
-            vmin=0, vmax=self.VMAX, origin="lower"
-        )
-        self.axOVC.set_xlabel("distance bin", color="grey", fontsize=6)
-        self.axOVC.set_ylabel("φ bin",         color="grey", fontsize=6)
-        self.fig.colorbar(
-            self.imOVC, ax=self.axOVC, fraction=0.046, pad=0.04
-        ).ax.tick_params(labelsize=6, colors="grey")
-
-        # ── Spatial Map: imshow PLACE_SIDE × PLACE_SIDE ───────────────────
-        _half = ENV_SIZE / 2.0
-        self.imSMap = self.axSMap.imshow(
-            numpy.zeros((PLACE_SIDE, PLACE_SIDE)),
-            aspect="equal", cmap="hot",
-            vmin=0, vmax=self.VMAX, origin="lower",
-            extent=[-_half, _half, -_half, _half]
-        )
-        self.fig.colorbar(
-            self.imSMap, ax=self.axSMap,
-            fraction=0.03, pad=0.02, label="V − Vrest (mV)"
-        ).ax.tick_params(labelsize=7, colors="grey")
-
-        # decoded position marker + heading arrow overlaid on Spatial Map
-        self.posMarker, = self.axSMap.plot(
-            [], [], "o", color="red", ms=8, zorder=5,
-            markeredgecolor="white", markeredgewidth=0.8
-        )
-        self.hdArrow = self.axSMap.annotate(
+        self.rayLines = [
+            self.axWorld.plot([], [], color="#44ff88", lw=0.5, alpha=0.5, zorder=2)[0]
+            for _ in range(CAMERA_COLUMNS)
+        ]
+        self.robotMarker, = self.axWorld.plot([], [], "o", color="cyan",
+                                              ms=10, zorder=4, markeredgecolor="white")
+        self.headingArrow = self.axWorld.annotate(
             "", xy=(0, 0), xytext=(0, 0),
-            arrowprops=dict(arrowstyle="->", color="red", lw=2.0), zorder=6
-        )
-        self.axSMap.set_xlim(-_half, _half)
-        self.axSMap.set_ylim(-_half, _half)
-        self.axSMap.set_xlabel("x (m)", color="grey", fontsize=8)
-        self.axSMap.set_ylabel("y (m)", color="grey", fontsize=8)
-
-        # status text overlay
-        self.txtStatus = self.axSMap.text(
-            0.02, 0.98, "", color="white", fontsize=7,
-            transform=self.axSMap.transAxes, va="top",
-            bbox=dict(facecolor="#1a1a2e", alpha=0.75, edgecolor="none")
+            arrowprops=dict(arrowstyle="->", color="cyan", lw=2), zorder=5
         )
 
-        # ── Run / Pause button ────────────────────────────────────────────
-        from matplotlib.widgets import Button
-        axBtn = self.fig.add_axes([0.02, 0.965, 0.07, 0.025])
-        self.btnRun = Button(
-            axBtn, "Pause", color="#2a2a4a", hovercolor="#3a3a6a"
+        self.txtStatus = self.axWorld.text(
+            0.02, 0.98, "", color="white", fontsize=8,
+            transform=self.axWorld.transAxes, va="top",
+            bbox=dict(facecolor="#1a1a2e", alpha=0.8, edgecolor="none")
         )
-        self.btnRun.label.set_color("white")
-        self.btnRun.on_clicked(self._toggleRun)
 
-    # ── axis factory ──────────────────────────────────────────────────────────
+        self.fig.canvas.mpl_connect("key_press_event", self._onKey)
+
+    # ── helpers ────────────────────────────────────────────────────────────
 
     def _makeAx(self, rect, title):
         ax = self.fig.add_axes(rect)
         ax.set_facecolor("#12122a")
-        ax.set_title(title, color="white", fontsize=8, pad=3)
+        ax.set_title(title, color="white", fontsize=9, pad=4)
         ax.tick_params(colors="grey", labelsize=6)
         for sp in ax.spines.values():
             sp.set_edgecolor("#3a3a6a")
         return ax
 
-    # ── connectivity arrows ───────────────────────────────────────────────────
+    def _makePolar(self, rect, title, bearingBins, cmap):
+        ax = self.fig.add_axes(rect, projection="polar")
+        ax.set_facecolor("#12122a")
+        ax.set_title(title, color="white", fontsize=9, pad=8)
+        ax.tick_params(colors="grey", labelsize=6)
+        ax.set_theta_zero_location("E")
+        ax.set_theta_direction(1)
+        ax.set_yticklabels([])
+        ax.grid(color="#3a3a6a", lw=0.3)
+        thetaEdges = numpy.linspace(0, 2 * numpy.pi, bearingBins + 1)
+        rEdges     = numpy.linspace(0, LIDAR_RANGE, DISTANCE_BINS + 1)
+        T, R = numpy.meshgrid(thetaEdges, rEdges)
+        zeros = numpy.zeros((DISTANCE_BINS, bearingBins))
+        mesh = ax.pcolormesh(T, R, zeros, cmap=cmap, vmin=0, vmax=self.VMAX, shading="flat")
+        return ax, mesh
 
-    def _drawArrows(self):
-        """
-        Draw FancyArrowPatch connections between population axes in
-        figure-fraction coordinates.  Must be called after canvas.draw()
-        so that axes positions are finalised.
-        """
-        def _pos(ax):
-            """Return (x0, x1, y0, y1, xc, yc) for an axis."""
-            p = ax.get_position()
-            return p.x0, p.x1, p.y0, p.y1, \
-                   (p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2
-
-        def _arrow(x1, y1, x2, y2, color, label="", rad=0.0):
-            patch = FancyArrowPatch(
-                (x1, y1), (x2, y2),
-                transform=self.fig.transFigure,
-                arrowstyle="->", color=color, lw=1.3,
-                mutation_scale=12,
-                connectionstyle=f"arc3,rad={rad}",
-                zorder=9
-            )
-            self.fig.add_artist(patch)
-            if label:
-                self.fig.text(
-                    (x1 + x2) / 2,
-                    max(y1, y2) + 0.016,
-                    label,
-                    color=color, fontsize=6, ha="center",
-                    transform=self.fig.transFigure
-                )
-
-        si = _pos(self.axSpeedIn)
-        sc = _pos(self.axSpeed)
-        hi = _pos(self.axHDIn)
-        hc = _pos(self.axHD)
-        gc = _pos(self.axGrid)
-        bv = _pos(self.axBVC)
-        ov = _pos(self.axOVC)
-        sm = _pos(self.axSMap)
-
-        # Speed Input → Speed Cells  (straight horizontal)
-        _arrow(si[1], si[5], sc[0], sc[5], self.C_SPEED)
-
-        # Speed Cells → Grid Cells  (arc down — Speed sits above Grid)
-        _arrow(sc[1], sc[5], gc[0], gc[5],
-               self.C_SPEED, label="speed", rad=-0.25)
-
-        # HD Input → HD Cells  (straight horizontal)
-        _arrow(hi[1], hi[5], hc[0], hc[5], self.C_HD)
-
-        # HD Cells → Grid Cells  (slight arc)
-        _arrow(hc[1], hc[5], gc[0], gc[5],
-               self.C_HD, label="HD", rad=0.1)
-
-        # Grid Cells → Spatial Map  (path integration)
-        _arrow(gc[1], gc[5], sm[0], sm[5],
-               self.C_GRID, label="path integration")
-
-        # BVC → Spatial Map  (Oja, boundary cues — arc below centre)
-        _arrow(bv[1], bv[5], sm[0], sm[5] + 0.08,
-               self.C_BVC, label="Oja (boundaries)", rad=-0.12)
-
-        # OVC → Spatial Map  (Oja, object cues — arc above centre)
-        _arrow(ov[1], ov[5], sm[0], sm[5] - 0.08,
-               self.C_OVC, label="Oja (objects)", rad=0.12)
-
-    # ── persistence filter (unchanged from original) ──────────────────────────
-
-    def _worldBin(self, d: float, phi: float):
-        pos  = self.network.decodePosition()
-        wx   = float(pos[0]) + d * numpy.cos(phi)
-        wy   = float(pos[1]) + d * numpy.sin(phi)
-        half = ENV_SIZE / 2.0
-        if not (-half <= wx < half and -half <= wy < half):
-            return None
-        col = min(int((wx + half) / NEURON_SPACING), PLACE_SIDE - 1)
-        row = min(int((wy + half) / NEURON_SPACING), PLACE_SIDE - 1)
-        return row, col
-
-    def _persistenceUpdate(self, d: float, phi: float):
-        cell = self._worldBin(d, phi)
-        if cell is not None:
-            self._observedThisCycle[cell] = True
-
-    def _persistenceCycleEnd(self):
-        self._persistenceGrid[ self._observedThisCycle] += 1
-        self._persistenceGrid[~self._observedThisCycle] -= PERSISTENCE_DECAY
-        numpy.clip(self._persistenceGrid, 0, PERSISTENCE_TAU * 2,
-                   out=self._persistenceGrid)
-        self._observedThisCycle[:] = False
-
-    def _classifyHit(self, d: float, phi: float) -> str:
-        cell = self._worldBin(d, phi)
-        if cell is None:
-            return "object"
-        return "boundary" if self._persistenceGrid[cell] >= PERSISTENCE_TAU \
-               else "object"
-
-    # ── CLV ───────────────────────────────────────────────────────────────────
-
-    def _clvDuty(self, points: list):
-        if not points:
-            return CLV_MIN_DUTY, 0.0
-        d_min = min(d for d, _ in points)
-        duty  = int(numpy.clip(CLV_SCALE / d_min, CLV_MIN_DUTY, CLV_MAX_DUTY))
-        return duty, d_min
-
-    # ── helpers ───────────────────────────────────────────────────────────────
-
-    def _pullV(self, pop) -> numpy.ndarray:
-        """Pull membrane voltage and return V − Vrest, clipped to [0, ∞)."""
+    def _pullV(self, pop):
         pop.vars["V"].pull_from_device()
         return numpy.maximum(
-            numpy.array(pop.vars["V"].view, dtype=numpy.float32) - self.VREST,
-            0.0
+            numpy.array(pop.vars["V"].view, dtype=numpy.float32) - self.VREST, 0.0
         )
 
-    def _pullRate(self, pop) -> numpy.ndarray:
-        """Pull Poisson firing rate from an input population."""
-        pop.vars["firingRate"].pull_from_device()
-        return numpy.array(pop.vars["firingRate"].view, dtype=numpy.float32)
+    def _setPolar(self, mesh, vVec, bearingBins):
+        grid = vVec.reshape(DISTANCE_BINS, bearingBins)
+        mesh.set_array(grid.ravel())
 
-    def _toggleRun(self, event):
-        self.running = not self.running
-        self.btnRun.label.set_text("Pause" if self.running else "Run")
-        self.fig.canvas.draw_idle()
+    # ── keyboard handler ─────────────────────────────────────────────────────
 
-    # ── animation update ──────────────────────────────────────────────────────
+    def _onKey(self, event):
+        if event.key == "w":
+            self.robot.forward(MOVE_SPEED)
+        elif event.key == "s":
+            self.robot.forward(-MOVE_SPEED)
+        elif event.key == "a":
+            self.robot.rotate(TURN_SPEED)
+        elif event.key == "d":
+            self.robot.rotate(-TURN_SPEED)
+        elif event.key == " ":
+            self.running = not self.running
 
-    def _update(self, frame):
-        # ── drain latest LiDAR revolution ─────────────────────────────────
-        points   = self.lidar.latest_scan()
-        bvcCount = 0
-        ovcCount = 0
-        duty     = CLV_MIN_DUTY
-        d_min    = 0.0
+    # ── injection: re-assert the latest depth frame + heading EVERY step ──────
 
-        if points:
-            self.network.setHDInput(0.0)
-            self.network.setSpeedInput(0.1)
+    def _injectStep(self, frame):
+        # CLEAR egocentric input first — the camera gives a fresh frame, not an addition
+        self.network.PWbPop.vars["Iext"].view[:] = 0.0
+        self.network.PWbPop.vars["Iext"].push_to_device()
+        self.network.PWoPop.vars["Iext"].view[:] = 0.0
+        self.network.PWoPop.vars["Iext"].push_to_device()
 
-            for d, phi in points:
-                self._persistenceUpdate(d, phi)
-            self._persistenceCycleEnd()
+        self.network.setHDInput(self.robot.heading)  # setHDInput already overwrites (=), good
+        for dist, egoBearing, kind in frame:
+            if kind == "boundary":
+                self.network.injectIntoPWb(dist, egoBearing)
+            else:
+                self.network.injectIntoPWo(dist, egoBearing)
 
-            for d, phi in points:
-                if self._classifyHit(d, phi) == "boundary":
-                    self.network.injectIntoBVCPopulation(d, phi)
-                    bvcCount += 1
-                else:
-                    self.network.injectIntoOVCPopulation(d, phi)
-                    ovcCount += 1
+    # ── animation update ─────────────────────────────────────────────────────
 
-            duty, d_min = self._clvDuty(points)
-            try:
-                self.lidar._serial.write(b"D" + bytes([duty]))
-            except Exception:
-                pass
-
-        # ── HESCC steps ───────────────────────────────────────────────────
+    def _update(self, frameIdx):
         if self.running:
-            for _ in range(UPDATE_INTERVAL_MS):
+            for _ in range(STEPS_PER_FRAME):
+                frame = self.camera.latest_frame()   # grab latest (may repeat between cam frames)
+                self._injectStep(frame)              # re-assert EVERY step -> persistent drive
                 self.network.step()
                 self.timestep += 1
+            self._lastFrame = self.camera.latest_frame()
+        else:
+            self._lastFrame = self.camera.latest_frame()
 
-        # ── pull activity from every population ───────────────────────────
-        speedInRate = self._pullRate(self.network.speedInputPop)
-        hdInRate    = self._pullRate(self.network.hdInputPop)
-        speedV      = self._pullV(self.network.speedCellPop)
-        hdV         = self._pullV(self.network.hdCellPop)
-        gridV       = self._pullV(self.network.gridCellPop)
-        bvcV        = self._pullV(self.network.BVCPop)
-        ovcV        = self._pullV(self.network.OVCPop)
-        smapV       = self._pullV(self.network.spatialMap)
-
-        if self.timestep % 100 == 0:
-            print(f"t={self.timestep}  SpatialMap V-Vrest: "
-                  f"min={smapV.min():.3f}  max={smapV.max():.3f}  "
-                  f"mean={smapV.mean():.4f}  (threshold gap = {self.VMAX})")
-            print(f"t={self.timestep}  GridCells V-Vrest: "
-                  f"max={gridV.max():.3f}  (threshold gap = {self.VMAX})")
-
-        # ── update line plots ─────────────────────────────────────────────
-        self.lineSpeedIn.set_ydata(speedInRate)
-        self.lineSpeed.set_ydata(speedV)
-        self.lineHDIn.set_ydata(hdInRate)
-        self.lineHD.set_ydata(hdV)
-
-        # ── update imshows ────────────────────────────────────────────────
-        _gridRows = GRID_CELL_AMOUNT // GRID_SIDE
-        self.imGrid.set_data(gridV.reshape(_gridRows, GRID_SIDE))
-        self.imBVC.set_data(bvcV.reshape(PHI_BIN_AMOUNT, DISTANCE_BIN_AMOUNT))
-        self.imOVC.set_data(ovcV.reshape(PHI_BIN_AMOUNT, DISTANCE_BIN_AMOUNT))
-        self.imSMap.set_data(smapV.reshape(PLACE_SIDE, PLACE_SIDE))
-
-        # ── decoded position and heading overlay ──────────────────────────
-        decodedPos = self.network.decodePosition()
-        decodedHD  = self.network.decodeHeading()
-        dx, dy     = float(decodedPos[0]), float(decodedPos[1])
-
-        self.posMarker.set_data([dx], [dy])
-        arrowLen = 2.0
-        self.hdArrow.set_position((dx, dy))
-        self.hdArrow.xy = (
-            dx + arrowLen * numpy.cos(decodedHD),
-            dy + arrowLen * numpy.sin(decodedHD)
+        # ── world overlay ─────────────────────────────────────────────────
+        self.robotMarker.set_data([self.robot.x], [self.robot.y])
+        self.headingArrow.set_position((self.robot.x, self.robot.y))
+        self.headingArrow.xy = (
+            self.robot.x + 1.0 * numpy.cos(self.robot.heading),
+            self.robot.y + 1.0 * numpy.sin(self.robot.heading)
         )
+        for idx, line in enumerate(self.rayLines):
+            if idx < len(self._lastFrame):
+                dist, egoBearing, _ = self._lastFrame[idx]
+                worldAngle = self.robot.heading + egoBearing
+                ex = self.robot.x + dist * numpy.cos(worldAngle)
+                ey = self.robot.y + dist * numpy.sin(worldAngle)
+                line.set_data([self.robot.x, ex], [self.robot.y, ey])
+            else:
+                line.set_data([], [])
 
-        # ── status text ───────────────────────────────────────────────────
+        # ── population readouts (polar) ───────────────────────────────────
+        self._setPolar(self.meshPWb, self._pullV(self.network.PWbPop), EGOCENTRIC_BEARING_BINS)
+        self._setPolar(self.meshPWo, self._pullV(self.network.PWoPop), EGOCENTRIC_BEARING_BINS)
+        self._setPolar(self.meshBVC, self._pullV(self.network.BVCPop), ALLOCENTRIC_BEARING_BINS)
+        self._setPolar(self.meshOVC, self._pullV(self.network.OVCPop), ALLOCENTRIC_BEARING_BINS)
+        self.lineHDC.set_ydata(self._pullV(self.network.HDCPop))
+
         self.txtStatus.set_text(
-            f"t={self.timestep}  "
-            f"pos=({dx:.1f},{dy:.1f})  "
-            f"HD={numpy.degrees(decodedHD):.0f}°\n"
-            f"BVC={bvcCount}  OVC={ovcCount}  "
-            f"PWM={duty}  d_min={d_min:.2f}m\n"
-            f"revs={self.lidar.revolutions}  "
-            f"pkts={self.lidar.packets_received}  "
-            f"drop={self.lidar.packets_dropped}"
+            f"t={self.timestep}\n"
+            f"pos=({self.robot.x:.1f}, {self.robot.y:.1f})\n"
+            f"heading={numpy.degrees(self.robot.heading):.0f}deg\n"
+            f"{'RUNNING' if self.running else 'PAUSED (space)'}"
         )
 
-        return (
-            self.lineSpeedIn, self.lineSpeed,
-            self.lineHDIn,    self.lineHD,
-            self.imGrid, self.imBVC, self.imOVC, self.imSMap,
-            self.posMarker,   self.txtStatus,
-        )
-
-    # ── entry point ───────────────────────────────────────────────────────────
+        return (self.robotMarker, self.txtStatus, self.meshPWb, self.meshPWo,
+                self.meshBVC, self.meshOVC, self.lineHDC, *self.rayLines)
 
     def run(self):
-        # Force a full render first so all axes positions are finalised,
-        # then draw the static connectivity arrows before the animation loop.
-        self.fig.canvas.draw()
-        self._drawArrows()
-
         self.ani = animation.FuncAnimation(
-            self.fig, self._update,
-            frames=None, interval=50,
-            blit=False, cache_frame_data=False
+            self.fig, self._update, frames=None,
+            interval=50, blit=False, cache_frame_data=False
         )
         plt.show()
 
-
-# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     print("! Initialising HESCC model")
     network = HESCC()
 
-    print("! Starting LiDAR interface")
-    lidar = LiDARInterface(port=SERIAL_PORT, baud=SERIAL_BAUD)
-    lidar._last_duty = 102
-    lidar.start()
+    world  = World()
+    robot  = Robot(0.0, 0.0, 0.0)
+    camera = SimulatedDepthCamera(world, robot)
+    camera.start()
 
-    print("! Launching visualiser")
-    vis = HESCCPipelineVisualiser(network, lidar)
-
+    print("! Launching simulator  (click the window, then use W/A/S/D)")
+    vis = RobotSimVisualiser(network, camera)
     try:
         vis.run()
     finally:
-        lidar.stop()
+        camera.stop()
