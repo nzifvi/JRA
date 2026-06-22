@@ -7,9 +7,15 @@
 
 ## Egocentric Segment Neuron Populations
 
-## Allocentric Segment Neuron Populations
+### PWo Neuron Population
+
+### PWb Neuron Population
 
 ## Transformation Circuit Segment Neuron Populations
+
+### GFTC Neuron Population
+
+### HDC Neuron Population
 
 # Injection Mechanism
 
