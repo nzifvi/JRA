@@ -54,3 +54,4 @@ $$\theta = tan^{-1}\bigg(\frac{x' - p_x}{f_x}\bigg)$$
 $$\phi = tan^{-1}\bigg(\frac{y' - p_y}{f_y}\bigg)$$
 
 ## Handling of Depth-channel-neuron-population Resolution Mismatch
+Due to the fact that the resolution of the depth channel and neuron population are not equivalent, there is a resolution mismatch between the two. This results in the issue that many pixels can map to one neuron.
