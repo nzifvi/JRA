@@ -65,6 +65,10 @@ Due to the fact that the resolution of the depth plane and neuron population are
 
 ## von Mises Bump Injection
 A von Mises bump, which is implemented as a Gaussian distribution kernel, was used as a smoothing mechanism to prevent objects, which are not parallel to the line of light of the camera, from being represented in a discontinuous form in the PWo and PWb populations. Furthermore,
-von Mises bump injection simulates how neurons, correlated with spatial representations, receive current.
+von Mises bump injection simulates how neurons, correlated with spatial representations, receive current. This is achieved by applying an external current which is inversely proportional to the distance from the neuron which the Gaussian kernel is centered over.
 
+The standard deviation, $\sigma$, of the Gaussian kernel determines the level at which the external current decreases as the distance from the central neuron increases. Injections into both the PWo and PWb neuron populations occur with standard deviation of 0.25.
 # Robot
+
+# References
+No proper format (sorry).
