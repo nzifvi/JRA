@@ -35,7 +35,6 @@ The camera is mathematically modelled as a pinhole camera: giving...
 4) Focal y-axis length $f_y$
 
 A point in Cartesian space $(x, y, z)$ is mapped to the depth plane using the Camera. This is expressed as
+
 $$x' = f_x \frac{x}{z}+p_x$$
-$$
-y' = f_y \frac{y}{z} + p_y
-$$
+$$y' = f_y \frac{y}{z} + p_y$$
