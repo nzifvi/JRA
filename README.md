@@ -64,10 +64,16 @@ $$\phi = tan^{-1}\bigg(\frac{y' - p_y}{f_y}\bigg)$$
 Due to the fact that the resolution of the depth plane and neuron population are not equivalent, a resolution mismatch exists between the two entities. Consequently, many pixels, from the depth plane, can map to a singular neuron in the population. 
 
 ## von Mises Bump Injection
-A von Mises bump, which is implemented as a Gaussian distribution kernel, was used as a smoothing mechanism to prevent objects, which are not parallel to the line of light of the camera, from being represented in a discontinuous form in the PWo and PWb populations. Furthermore,
-von Mises bump injection simulates how neurons, correlated with spatial representations, receive current. This is achieved by applying an external current which is inversely proportional to the distance from the neuron which the Gaussian kernel is centered over.
+A von Mises bump, which is implemented as a Gaussian distribution mask, was used as a smoothing mechanism to prevent objects, which are not parallel to the line of light of the camera, from being represented in a discontinuous form in the PWo and PWb populations. Furthermore,
+von Mises bump injection simulates how neurons, correlated with spatial representations, receive current. This is achieved by applying an external current which is inversely proportional to the distance from the neuron which the Gaussian mask is centered over. This means that a Gassuain mask is created, distributed over the entire neuron population, and is centered on the neuron being directly injected into.
 
-The standard deviation, $\sigma$, of the Gaussian kernel determines the level at which the external current decreases as the distance from the central neuron increases. Injections into both the PWo and PWb neuron populations occur with standard deviation of 0.25.
+Initially, a mask where each element is equal to the polar distance from the central neuron is created. The below function is then applied to each element in order to calculate the external current to apply to each and every neuron based on the sigma value and the distance from the central neuron.
+
+$$f = MakeFunction$$
+
+After multiple calibration runs, a sigma of 0.25 was chosen.
+
+$$G = h$$
 # Robot
 
 # References
