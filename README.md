@@ -58,6 +58,7 @@ $$\phi = tan^{-1}\bigg(\frac{y' - p_y}{f_y}\bigg)$$
 ## Handling of Depth-plane-neuron-population Resolution Mismatch
 Due to the fact that the resolution of the depth plane and neuron population are not equivalent, a resolution mismatch exists between the two entities. Consequently, many pixels, from the depth plane, can map to a singular neuron in the population. 
 
-## Gaussian Injection
+## von Mises Bump Injection
+A von Mises bump, which is implemented as a Gaussian distribution kernel, was used as a smoothing mechanism to prevent objects, which are not parallel to the line of light of the camera, from being represented in a discontinuous form in the PWo and PWb populations.
 
 # Robot
