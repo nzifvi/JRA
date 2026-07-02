@@ -7,19 +7,24 @@
 
 # Neuron Populations
 
-## Egocentric Segment Neuron Populations
+## Egocentric Neuron Populations
 
 ### PWo Neuron Population
 
 ### PWb Neuron Population
 
-## Transformation Circuit Segment Neuron Populations
+## Transformation Circuit Neuron Populations
 
 ### GFTC Neuron Population
 
 ### HDC Neuron Population
 
-## Allocentric Segment Neuron Populations
+## Allocentric Neuron Populations
+### BVC Neuron Population
+
+### OVC Neuron Population
+
+### Place Cell Neuron Population
 
 # Injection Mechanism
 The injection mechanism, into both PWo and PWb populations, aims to inject a von Mises bump formatted injection, by means of a Gaussian kernel. This is described by a function that maps an input pixel $(x, y)$ which corresponds to a depth $d_{x,y}$ to a neuron with a preferred egocentric
