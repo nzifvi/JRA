@@ -43,3 +43,6 @@ Reversing this mapping (x' -> x) and (y' -> y) yields:
 
 $$\frac{x}{z} = \frac{x' - p_x}{f_x}$$
 $$\frac{y}{z} = \frac{y' - p_y}{f_y}$$
+
+$$tan(\theta) = \frac{x}{z}$$
+$$tan(\phi) = \frac{y}{z}$$
