@@ -53,5 +53,5 @@ cooridnate system to be transformed into the required polar coordinate system th
 $$\theta = tan^{-1}\bigg(\frac{x' - p_x}{f_x}\bigg)$$
 $$\phi = tan^{-1}\bigg(\frac{y' - p_y}{f_y}\bigg)$$
 
-## Handling of Depth-channel-neuron-population Resolution Mismatch
-Due to the fact that the resolution of the depth channel and neuron population are not equivalent, there is a resolution mismatch between the two. This results in the issue that many pixels can map to one neuron.
+## Handling of Depth-plane-neuron-population Resolution Mismatch
+Due to the fact that the resolution of the depth plane and neuron population are not equivalent, a resolution mismatch exists between the two entities. Consequently, many pixels, from the depth plane, can map to a singular neuron in the population. 
