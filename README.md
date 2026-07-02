@@ -22,6 +22,8 @@
 ## Allocentric Segment Neuron Populations
 
 # Injection Mechanism
+The injection mechanism, into both PWo and PWb populations, aims to inject a von Mises bump formatted injection, by means of a Gaussian kernel. This is described by a function that maps an input pixel $(x, y)$ which corresponds to a depth $d_{x,y}$ to a neuron with a preferred egocentric
+azimuth $\theta_{e}(x)$, a preferred egocentric bearing $\phi_{e}(y)$, and a preferred distance $d_{x,y}$.
 
 ## Camera-based Inputs
 The surrounding egocentric environment is scanned using a D445 camera. The sole channel used is the depth channel. The depth plane, $D$, can be modelled as a matrix, with $M$ height and $N$ width, where each pixel $(x', y')$ represents the recorded depth.
