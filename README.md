@@ -50,7 +50,7 @@ $$tan(\phi) = \frac{y}{z}$$
 The azimuth angle, $\theta$, and the elevation angle, $\phi$, can be derived from the ratios ratios which have been themselves derived from the inverse mapping. This enables the cartesian-based
 cooridnate system to be transformed into the required polar coordinate system the PWo and PWb neuron populations need.
 
-## Handling of Depth-channel-neuron-population Resolution Mismatch
-
 $$\theta = tan^{-1}\bigg(\frac{x' - p_x}{f_x}\bigg)$$
 $$\phi = tan^{-1}\bigg(\frac{y' - p_y}{f_y}\bigg)$$
+
+## Handling of Depth-channel-neuron-population Resolution Mismatch
