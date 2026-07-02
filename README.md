@@ -25,3 +25,6 @@
 
 ## Camera-based Inputs
 The surrounding egocentric environment is scanned using a D445 camera. The sole channel used is the depth channel. The depth channel, $D$, can be modelled as a matrix with $M$ height and $N$ width.
+$$
+D_{M\times N}
+$$
