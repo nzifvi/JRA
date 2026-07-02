@@ -59,3 +59,5 @@ $$\phi = tan^{-1}\bigg(\frac{y' - p_y}{f_y}\bigg)$$
 Due to the fact that the resolution of the depth plane and neuron population are not equivalent, a resolution mismatch exists between the two entities. Consequently, many pixels, from the depth plane, can map to a singular neuron in the population. 
 
 ## Gaussian Injection
+
+# Robot
