@@ -38,3 +38,8 @@ A point in Cartesian space $(x, y, z)$ is mapped to the depth plane using the Ca
 
 $$x' = f_x \frac{x}{z}+p_x$$
 $$y' = f_y \frac{y}{z} + p_y$$
+
+Reversing this mapping (x' -> x) and (y' -> y) yields:
+
+$$\frac{x}{z} = \frac{x' - p_x}{f_x}$$
+$$\frac{y}{z} = \frac{y' - p_y}{f_y}$$
