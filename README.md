@@ -1,62 +1,80 @@
 # Relevant Links
 [Project Plan and Progress](https://trello.com/b/QE3CF7Dn/jra)
 
-# WPSNN
-## WPSNN Architecture
-### Neuron Lattice
-WPSNN is organised into a neuron lattice that exists in a spherical coordinate system space, of radius R, segmented by rings. The origin neuron is (0, 0).
-Each ring is defined using...
+# Overview
 
-$$r = i \cdot d$$
+# Biological Motivation
 
-...where $d$ is neuronSpacing and i is a natural number with bounded between [0, ceil(R/d)]
+# Neuron Populations
 
-Arc-length scaling is used to determine the number of neurons to apply, per ring, to ensure uniform density across all rings. The number of neurons on ring r, N(r), is defined as...
+## Egocentric Neuron Populations
 
-$$N(r) = ceil\bigg(\frac{2\pi r}{d}\bigg)$$
+### PWo Neuron Population
 
-The angular difference on each ring, $\Delta \theta$, is the angle between adjacent neurons on the same ring. The angular difference of ring r is defined as...
+### PWb Neuron Population
 
-$$ \Delta \theta (r) = \frac{2\pi}{N(r)} $$
+## Transformation Circuit Neuron Populations
 
-Ultimately, this results in the WPSNN having the structure below:
-<div align="center">
-  <img src="neuronLatticeStructure.png" width="60%"/>
-</div>
+### GFTC Neuron Population
 
-Where green arrows represent angular connections between neighbouring neurons, in blue, and red represent radial connections between neurons.
-Due to how radial outward neighbours are calculated, one neuron on ring i will only connect to one neuron on ring i+1. This means that there will be a subset
-of neurons on ring i+1 which can only be accessed by angular neighbours on ring i+1 rather than radial neighbours on ring i. This only occurs
-if ring i+1 is more dense than ring i.
+### HDC Neuron Population
 
+## Allocentric Neuron Populations
+### BVC Neuron Population
 
+### OVC Neuron Population
 
-## Measurement Binning
-A LIDAR sensor will output a measurement vector, $\vec{z}$, which has 3 elements with a real number value.
+### Place Cell Neuron Population
 
-$$ \vec{z} = \begin{bmatrix}r \\ \theta \\ \phi \end{bmatrix}$$
+# Injection Mechanism
+The injection mechanism, into both PWo and PWb populations, aims to inject a von Mises bump formatted injection, by means of a Gaussian kernel. This is described by a function that maps an input pixel $(x, y)$ which corresponds to a depth $d_{x,y}$ to a neuron with a preferred egocentric
+azimuth $\theta_{e}(x)$, a preferred egocentric bearing $\phi_{e}(y)$, and a preferred distance $d_{x,y}$.
 
-The neuron lattice is a discrete structure. Therefore, continous measurements are made to correspond with neurons at discrete locations. This is done by binning the 3 
-measurements part of the measurement vector. This forms a binned equivalent of the measurements vector where each element is a number from a discrete domain defined by the 
-neuron lattice. The binned equivalents are calculated via...
+## Camera-based Inputs
+The surrounding egocentric environment is scanned using a D445 camera. The sole channel used is the depth channel. The depth plane, $D$, can be modelled as a matrix, with $M$ height and $N$ width, where each pixel $(x', y')$ represents the recorded depth.
 
-$$r_{binned} = round\bigg(\frac{r}{d}\bigg) \cdot d$$
+$$D_{M\times N} = \begin{bmatrix} d_{1,1} && ... && d_{1,N} \\\\ \vdots && \ddots && \vdots \\\\ d_{M,1} && ... && d_{M,N}\end{bmatrix}$$
 
-$$\theta_{binned} = \bigg(\ round\bigg(\frac{\theta}{\Delta \theta_{bin}}\bigg) \cdot \Delta \theta_{bin} \bigg) mod 2\pi$$
+The camera is mathematically modelled as a pinhole camera: giving...
+1) Principal x-oridnate $p_x$
+2) Principal y-ordinate $p_y$
+3) Focal x-axis length $f_x$
+4) Focal y-axis length $f_y$
 
-... where $d$ is the neuron spacing and $\Delta \theta_{bin}$ is the thetaBinWidth. The thetaBinWidth controls the domain a bin covers. The modulo operation wraps values, at exist outside the boundary of a possible domain, back to the other side.
+A point in Cartesian space $(x, y, z)$ is mapped to the depth plane using the Camera. This is expressed as
 
-## Propagation Diagnostics
-## Import Details
-Custom LIF model uses Euler integration whilst PyGenn LIF model uses exact exponential integration (will be changed later).
+$$x' = f_x \frac{x}{z}+p_x$$
+$$y' = f_y \frac{y}{z} + p_y$$
 
-### Custom LIF vs PyGenn LIF Refactory Times
-![Refactory Comparison](neuronFiringPlot.png)
+Reversing this mapping (x' -> x) and (y' -> y) yields:
 
-### Wavefront Propagation
+$$\frac{x}{z} = \frac{x' - p_x}{f_x}$$
+$$\frac{y}{z} = \frac{y' - p_y}{f_y}$$
 
-#### PyGenn LIF
-![PyGenn LIF](plotWithDefaultLIF.png)
+$$tan(\theta) = \frac{x}{z}$$
+$$tan(\phi) = \frac{y}{z}$$
 
-#### Custom LIF
-![Custom LIF](plotWithCustomLIF.png)
+The azimuth angle, $\theta$, and the elevation angle, $\phi$, can be derived from the ratios ratios which have been themselves derived from the inverse mapping. This enables the cartesian-based
+cooridnate system to be transformed into the required polar coordinate system the PWo and PWb neuron populations need.
+
+$$\theta = tan^{-1}\bigg(\frac{x' - p_x}{f_x}\bigg)$$
+$$\phi = tan^{-1}\bigg(\frac{y' - p_y}{f_y}\bigg)$$
+
+## Handling of Depth-plane-neuron-population Resolution Mismatch
+Due to the fact that the resolution of the depth plane and neuron population are not equivalent, a resolution mismatch exists between the two entities. Consequently, many pixels, from the depth plane, can map to a singular neuron in the population. 
+
+## von Mises Bump Injection
+A von Mises bump, which is implemented as a Gaussian distribution mask, was used as a smoothing mechanism to prevent objects, which are not parallel to the line of light of the camera, from being represented in a discontinuous form in the PWo and PWb populations. Furthermore,
+von Mises bump injection simulates how neurons, correlated with spatial representations, receive current. This is achieved by applying an external current which is inversely proportional to the distance from the neuron which the Gaussian mask is centered over. This means that a Gassuain mask is created, distributed over the entire neuron population, and is centered on the neuron being directly injected into.
+
+Initially, a mask where each element is equal to the polar distance from the central neuron is created. The below function is then applied to each element in order to calculate the external current to apply to each and every neuron based on the sigma value and the distance from the central neuron.
+
+$$f = MakeFunction$$
+
+After multiple calibration runs, a sigma of 0.25 was chosen.
+
+$$G = h$$
+# Robot
+
+# References
+No proper format (sorry).
