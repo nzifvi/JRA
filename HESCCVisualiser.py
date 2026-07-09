@@ -6,8 +6,8 @@ matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from HESCC import (HESCC, DISTANCE_BINS, EGOCENTRIC_BEARING_BINS,
-                   ALLOCENTRIC_BEARING_BINS, HDC_COUNT, LIDAR_RANGE)
+from GFTC import (HESCC, DISTANCE_BINS, EGOCENTRIC_BEARING_BINS,
+                  ALLOCENTRIC_BEARING_BINS, HDC_COUNT, LIDAR_RANGE)
 
 STEPS_PER_FRAME = 20                   # HESCC steps per animation frame (sim runs faster than redraw)
 MOVE_SPEED      = 0.25                 # metres per key press (W/S)

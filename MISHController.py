@@ -5,12 +5,13 @@ import threading
 import evdev
 import serial
 import numpy
-import pandas
-import struct
 
 from Joystick import Joystick
+from LIDARInterface import Camera
 
-from SignalSystem import RobotState
+
+from GFTC import GFTC
+from SignalSystem import BiDirectionalChannel, RobotState
 
 class PIDController:
     def __init__(self, kp, ki, kd, dt, queueCapacity):
@@ -75,14 +76,99 @@ class BayesOptimalIntegrator:
         posteriorMean = sensor1Mean * (sensor1Precision/posteriorPrecision) + sensor2Mean * (sensor2Precision/posteriorPrecision)
         return posteriorMean
 
+class MISHController:
+    def __init__(self):
+        self.allocentricPose = numpy.zeros(3)
+        self.GFTC = GFTC()
+        self.robotState = RobotState.INIT
+
+    def _updateAllocentricPose(self):
+        allocentricPosEstimate     = self.GFTC.decodePosition()
+        allocentricHeadingEstimate = self.GFTC.decodeHeading()
+
+        self.allocentricPose[:2] = [allocentricPosEstimate[0], allocentricPosEstimate[1]]
+        self.allocentricPose[2] = allocentricHeadingEstimate
+
+    def _calculateTargetBearingAndDistance(self, targetPosition):
+        deltaPos = targetPosition - self.allocentricPose[:2]
+        return numpy.arctan2(deltaPos[1], deltaPos[0]), numpy.linalg.norm(deltaPos)
+
+    def _calculateAppliedAngularVelocities(self, deltaTheta, appliedVelocity = 0.0):
+        correctedAngularVelocity = self.angularVelocityKP * deltaTheta
+
+        leftWheelAngularVelocity = (appliedVelocity + self.wheelToCentreDist * correctedAngularVelocity) / self.wheelRadius
+        rightWheelAngularVelocity = (appliedVelocity - self.wheelToCentreDist * correctedAngularVelocity) / self.wheelRadius
+
+        return leftWheelAngularVelocity, rightWheelAngularVelocity
+
+    def _rotate(self, targetPosition) -> bool:
+        targetBearing, _ = self._calculateTargetBearingAndDistance(targetPosition)
+
+        deltaTheta = targetBearing - self.allocentricPose[2]
+        deltaTheta = numpy.arctan2(numpy.sin(deltaTheta), numpy.cos(deltaTheta))
+
+        if abs(deltaTheta) < self.angleTolerance:
+            return True # rotation finished. current bearing aligned to target bearing
+        else:
+            leftWheelAngularVelocity, rightWheelAngularVelocity = self._calculateAppliedAngularVelocities(deltaTheta)
+            # drive wheels
+            return False
+
+    def _drive(self, targetPosition) -> bool:
+        targetBearing, targetDistance = self._calculateTargetBearingAndDistance(targetPosition)
+
+        if targetDistance < self.distanceTolerance:
+            return True
+        else:
+            velocityApplied = numpy.clip(
+                self.linearVelocityKP * targetDistance,
+                0.0,
+                self.maxLinearVelocity
+            )
+
+            deltaTheta = targetBearing - self.allocentricPose[2]
+            deltaTheta = numpy.arctan2(numpy.sin(deltaTheta), numpy.cos(deltaTheta))
+
+            leftWheelAngularVelocity, rightWheelAngularVelocity = self._calculateAppliedAngularVelocities(
+                deltaTheta = deltaTheta if abs(deltaTheta) > self.angleTolerance else 0.0,
+                appliedVelocity = velocityApplied
+            )
+            return False
+
+    def step(self):
+        self.GFTC.step()
+        self._updateAllocentricPose()
+
+        if self.GFTC.checkPath(self.pathIndex):
+            self.robotState = RobotState.PATH_BLOCKED
+
+        if self.robotState == RobotState.INIT:
+            pass
+        elif self.robotState == RobotState.ROTATE:
+            isHeadingAligned = self._rotate(self.currentTargetPosition)
+            if isHeadingAligned:
+                self.robotState = RobotState.DRIVE
+        elif self.robotState == RobotState.DRIVE:
+            isAtCurrentTargetPosition = self._drive(self.currentTargetPosition)
+            if isAtCurrentTargetPosition:
+                if len(self.path) == 0:
+                    self.robotState = RobotState.FINISHED
+                else:
+                    self._currentTargetPosition = self.path.dequeue()
+                    self.robotState = RobotState.ROTATE
+        elif self.robotState == RobotState.PATH_BLOCKED:
+            leftWheelAngularVelocity  = 0.0
+            rightWheelAngularVelocity = 0.0
+
+            # EMERGENCY STOP: set angular velocities, of all motors, to 0.
+
+            self.pathQueue.clear()
+            self.navigateTo(self.finalTargetPosition)
+            self.robotState = RobotState.ROTATE
+
 class Supervisor:
-    LIDAR_BAUD                = 230400
-    LIDAR_PACKET_LENGTH       = 47
-    LIDAR_HEADER              = 0x54
-    LIDAR_VERLEN              = 0x2C
-    LIDAR_MIN_CONF            = 20
     MANUAL_MODE_CODE          = 304
-    SAVE_DATA_CODE            = 307
+    AUTONOMOUS_MODE_CODE      = 307
     CONNECTION_RETRY_ATTEMPTS = 5
 
     TELEMETRY_PATTERN = re.compile(
@@ -92,31 +178,21 @@ class Supervisor:
 
     def __init__(self):
         self.joystick = Joystick(maxRetryAttempts = Supervisor.CONNECTION_RETRY_ATTEMPTS)
+        self.camera   = Camera()
 
         self.currentMode     = "idle"
         self.lastCommandTime = 0.0
         self.lastCommandSent = ""
 
         self.ser               = None
-        self.latestHeading            = None
-        self.latestEgocentricAzimuth  = None
-        self.latestEgocentricDistance = None
-
+        self.latestAzimuth     = None
         self.latestEncoderFlow = None
 
         self._serialReaderThread = None
-        self.lidarSer            = None
-        self.lidarReaderThread   = None
+
+        self.mish = MISHController()
 
         self.stopEvent = threading.Event()
-
-        self.df = pandas.DataFrame({
-            'time'               : pandas.Series(dtype=float),
-            'egocentricAzimuth'  : pandas.Series(dtype=float),
-            'egocentricDistance' : pandas.Series(dtype=float),
-            'heading'            : pandas.Series(dtype=float)
-        })
-        self.dfCount = self.readDataCacheCount()
 
 
     def _findArduinoPort(self):
@@ -150,71 +226,6 @@ class Supervisor:
                 print("Failed to open Arduino on {}: {}".format(port, e))
                 time.sleep(2)
         raise RuntimeError(f"! ERROR: could not connect to Ardunio after {self.CONNECTION_RETRY_ATTEMPTS} attempts")
-
-    def _findLidarPort(self):
-        ports = glob.glob("/dev/ttyUSB*")
-        for port in ports:
-            try:
-                s = serial.Serial(port, Supervisor.LIDAR_BAUD, timeout = 1)
-                s.close()
-                return port
-            except Exception as e:
-                print("[LIDAR] found {} but was unable to open serial connection due to {]".format(port, e))
-                return None
-
-    def _connectLIDAR(self):
-        for i in range(self.CONNECTION_RETRY_ATTEMPTS):
-            port = self._findLidarPort()
-            if not port:
-                print("    - Cannot find LiDAR. Retrying")
-                time.sleep(2)
-                continue
-            try:
-                ser = serial.Serial(port, Supervisor.LIDAR_BAUD, timeout=1)
-                print("    - Connected to LiDAR on {}".format(port))
-                return ser
-            except Exception as e:
-                print("Failed to open LiDAR on {}: {}".format(port, e))
-                time.sleep(2)
-        raise RuntimeError(f"! ERROR: could not connect to LiDAR after {self.CONNECTION_RETRY_ATTEMPTS} attempts")
-
-    def _lidadrCRC8(self, data):
-        crc = 0
-        for b in data:
-            crc = self._lidarCRCTable[(crc ^ b) & 0xFF]
-        return crc
-
-    def _readLidar(self):
-        buffer = bytearray()
-        LOOK_AHEAD = Supervisor.LIDAR_PACKET_LENGTH + 2
-        while not self.stopEvent.is_set():
-            try:
-                chunk = self.lidarSer.read(512)
-                if not chunk:
-                    continue
-                buffer.extend(chunk)
-
-                while len(buffer) >= LOOK_AHEAD:
-                    if buffer[0] != Supervisor.LIDAR_HEADER or buffer[1] != Supervisor.LIDAR_VERLEN:
-                        buffer.pop(0)
-                        continue
-                    if (buffer[47] != Supervisor.LIDAR_HEADER or buffer[48] != Supervisor.LIDAR_VERLEN):
-                        buffer.pop(0)
-                        continue
-
-                    packet = bytes(
-                        buffer[:Supervisor.LIDAR_PACKET_LENGTH]
-                    )
-                    del buffer[:Supervisor.LIDAR_PACKET_LENGTH]
-
-                    startAngle = struct.unpack_from("<H", packet, 4)
-                    endAngle   = struct.unpack_from("<H", packet, 42)
-
-                    start = startAngle * 0.01
-                    sweep = ((endAngle - startAngle) % 36000) * 0.01
-
-
-
 
     def _readSerial(self):
         while not self.stopEvent.is_set():
@@ -285,9 +296,9 @@ class Supervisor:
                         if code == self.MANUAL_MODE_CODE:
                             print("[SUPERVISOR] mode = manual")
                             self.currentMode = "manual"
-                        elif code == self.SAVE_DATA_CODE:
-                            print("[SUPERVISOR] saving telemetry data")
-                            self.currentMode = "save"
+                        elif code == self.AUTONOMOUS_MODE_CODE:
+                            print("[SUPERVISOR] mode = autonomous")
+                            self.currentMode = "autonomous"
                 else:
                     self.currentMode = "idle"
 
@@ -299,28 +310,33 @@ class Supervisor:
                 forward = leftY + rightY
 
                 if self.currentMode == "manual":
-                    lin    = forward / 127
+                    lin = forward / 127
                     strafe = -leftX / 127
-                    rot    = rightX / 127
-                elif self.currentMode == "save":
-                    self.saveTelemetry()
-                    print("[SUPERVISOR] saving complete. returning to manual mode")
-                    self.currentMode = "manual"
+                    rot = rightX / 127
+                elif self.currentMode == "autonomous":
+                    lin, strafe, rot = 0.0, 0.0, 0.0
+                    if self.mish is not None:
+                        try:
+                            distanceFrame = self.camera.getLatestDistanceFrame() if self.camera else None
+
+                            self.mish.GFTC.setHDInput(
+                                heading_rad = self.latestAzimuth * (numpy.pi / 180.0)
+                            )
+                            # FIGURE OUT HOW TO DIFFERENTIATE OBJECTS AND BOUNDARIES
+                            # - PWo must receive a varient of the distanceFrame which focuses on objects.
+                            # - PWb must receive a varient of the distanceFrame which focus on boundaries
+
+                            self.mish.step()
+                        except Exception as e:
+                            if iterationTime - lastAutonomousWarning >= 1.0:
+                                print("[AUTONOMOUS] mish.step() raised:", e)
+                                lastAutonomousWarning = iterationTime
                 else:
-                    lin    = 0.0
+                    lin = 0.0
                     strafe = 0.0
-                    rot    = 0.0
+                    rot = 0.0
 
                 self._writeCommand(lin, strafe, rot)
-
-                newEntry = {
-                    'time' : iterationTime,
-                    'egocentricAzimuth'  : self.latestEgocentricAzimuth if self.latestEgocentricAzimuth is not None else float("nan"),
-                    'egocentricDistance' : self.latestEgocentricDistance if self.latestEgocentricDistance is not None else float("nan"),
-                    'heading'            : self.latestAzimuth if self.latestAzimuth is not None else float("nan")
-                }
-
-
 
             except Exception as e:
                 self.stopAll(f"Supervisor.run() failed: {e}")
@@ -339,25 +355,6 @@ class Supervisor:
 
         if self.ser:
             self.ser.close()
-
-    def readDataCacheCount(self) -> int:
-        dfCount = None
-        with open("/DataCache/dfCount.txt", "r") as file:
-            dfCount = int(file.read())
-        return dfCount
-
-    def writeDataCacheCount(self, dfCount: int) -> None:
-        with open("/DataCache/dfCount.txt", "w") as file:
-            file.write(str(dfCount))
-
-    def saveTelemetry(self):
-        self.df.to_csv(
-            path_or_buf = f"/DataCache/telemetry{self.dfCount}.csv",
-            index = False
-        )
-        self.dfCount += 1
-        self.writeDataCacheCount(self.dfCount)
-
 
 if __name__ == "__main__":
     supervisor = Supervisor()

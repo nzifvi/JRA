@@ -72,7 +72,7 @@ _GFTC_PARAMS = {
 _GFTC_VARS = {"V": -65.0, "RefracTime": 0.0}
 
 
-class HESCC:
+class GFTC:
     def __init__(self):
         os.makedirs(CACHE_PATH, exist_ok=True)
 
@@ -259,7 +259,7 @@ class HESCC:
         pop.vars["Iext"].pull_from_device()
         # if summing external current, rather than just reassigning, it appears that membrane voltage appears to be
         # more noisy
-        # - reassignment, rather than simulation, produces a cleaner membrane voltage.
+        # - reassignment, rather than accumulation, produces a cleaner membrane voltage.
         pop.vars["Iext"].view[:] += kernel
         numpy.clip(
             a = pop.vars["Iext"].view[:],
