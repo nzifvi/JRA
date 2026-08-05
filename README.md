@@ -1,5 +1,7 @@
 # Overview
 
+# Lidar observations as Injections
+
 # Neuron Populations
 Three neuron populations exist within the model: SpatialMap, MemoryMap, and SpikeSourceArray. Each neuron population interacts with other neuron populations, via synaptic connections, yet each perform a distinct function. It should be noted that both the SpatialMap and MemoryMap neurons share the same values upon initialisation besides a few values which have either been fine tuned or are values of varibles exclusive to the respective population.
 
