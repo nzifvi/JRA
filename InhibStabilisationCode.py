@@ -107,5 +107,5 @@ for ax in (ax1, ax2):
     ax.set_xlim(0, TOTAL)
 
 plt.tight_layout()
-plt.savefig("selective_suppression.png", dpi=300, bbox_inches="tight")
+plt.savefig("figures/selective_suppression.png", dpi=300, bbox_inches="tight")
 plt.show()
