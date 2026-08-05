@@ -1,207 +1,91 @@
-import glob
 import re
 import time
 import threading
-import evdev
+
 import serial
+import glob
 import numpy
 
+import os
+
 from Joystick import Joystick
-from LIDARInterface import Camera
+from LIDARInterface import LIDARInterface
+from Odometer import Odometer
+from SpatialMap import TrigSpatialMap
 
+from SpatialMapViewer import SpatialMapViewer
 
-from GFTC import GFTC
-from SignalSystem import BiDirectionalChannel, RobotState
-
-class PIDController:
-    def __init__(self, kp, ki, kd, dt, queueCapacity):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.dt = dt
-
-        self.errorQueue = []
-        self.queueCapacity = queueCapacity
-
-
-    def _calculateDiscretisedIntegral(self, error):
-        if len(self.errorQueue) > self.queueCapacity:
-            self.errorQueue.pop(0)
-        self.errorQueue.append(error)
-
-        return self.dt * (sum(self.errorQueue))
-
-    def _calculateDiscretisedDerivative(self, error):
-        if len(self.errorQueue) >= 2:
-            return (error - self.errorQueue[-2]) / self.dt
-        else:
-            return 0
-
-    def calculateDesiredTarget(self, error):
-        return (self.kp * error) + (self.ki * self._calculateDiscretisedIntegral(error)) + (self.kd * ())
-
-class BayesOptimalIntegrator:
-    # Take measurements, from rotary encoders on the same side, and produce a reliability estimate
-    # using Bayes-optimal Integration
-    def __init__(self, queueCapacity):
-        self.sensor1Readings = []
-        self.sensor2Readings = []
-        self.queueCapcity = queueCapacity
-
-    def _loadReading(self, queue, reading):
-        if len(queue) >= self.queueCapcity:
-            queue.pop(0)
-        queue.append(reading)
-
-    def _calculateMean(self, queue):
-        return sum(queue) / len(queue)
-
-    def _calculateVariance(self, queue):
-        mean = self._calculateMean(queue)
-        return sum((x - mean) ** 2 for x in queue) / len(queue)
-
-    def _calculatePrecision(self, queue):
-        return 1 / self._calculateVariance(queue)
-
-    def _calculatePosteriorPrecision(self) -> tuple:
-        sensor1Precision = self._calculatePrecision(self.sensor1Readings)
-        sensor2Precision = self._calculatePrecision(self.sensor2Readings)
-        return sensor1Precision + sensor2Precision, sensor1Precision, sensor2Precision
-
-    def _calculatePosteriorMean(self):
-        posteriorPrecision, sensor1Precision, sensor2Precision = self._calculatePosteriorPrecision()
-        sensor1Mean = self._calculateMean(self.sensor1Readings)
-        sensor2Mean = self._calculateMean(self.sensor2Readings)
-
-        posteriorMean = sensor1Mean * (sensor1Precision/posteriorPrecision) + sensor2Mean * (sensor2Precision/posteriorPrecision)
-        return posteriorMean
-
-class MISHController:
-    def __init__(self):
-        self.allocentricPose = numpy.zeros(3)
-        self.GFTC = GFTC()
-        self.robotState = RobotState.INIT
-
-    def _updateAllocentricPose(self):
-        allocentricPosEstimate     = self.GFTC.decodePosition()
-        allocentricHeadingEstimate = self.GFTC.decodeHeading()
-
-        self.allocentricPose[:2] = [allocentricPosEstimate[0], allocentricPosEstimate[1]]
-        self.allocentricPose[2] = allocentricHeadingEstimate
-
-    def _calculateTargetBearingAndDistance(self, targetPosition):
-        deltaPos = targetPosition - self.allocentricPose[:2]
-        return numpy.arctan2(deltaPos[1], deltaPos[0]), numpy.linalg.norm(deltaPos)
-
-    def _calculateAppliedAngularVelocities(self, deltaTheta, appliedVelocity = 0.0):
-        correctedAngularVelocity = self.angularVelocityKP * deltaTheta
-
-        leftWheelAngularVelocity = (appliedVelocity + self.wheelToCentreDist * correctedAngularVelocity) / self.wheelRadius
-        rightWheelAngularVelocity = (appliedVelocity - self.wheelToCentreDist * correctedAngularVelocity) / self.wheelRadius
-
-        return leftWheelAngularVelocity, rightWheelAngularVelocity
-
-    def _rotate(self, targetPosition) -> bool:
-        targetBearing, _ = self._calculateTargetBearingAndDistance(targetPosition)
-
-        deltaTheta = targetBearing - self.allocentricPose[2]
-        deltaTheta = numpy.arctan2(numpy.sin(deltaTheta), numpy.cos(deltaTheta))
-
-        if abs(deltaTheta) < self.angleTolerance:
-            return True # rotation finished. current bearing aligned to target bearing
-        else:
-            leftWheelAngularVelocity, rightWheelAngularVelocity = self._calculateAppliedAngularVelocities(deltaTheta)
-            # drive wheels
-            return False
-
-    def _drive(self, targetPosition) -> bool:
-        targetBearing, targetDistance = self._calculateTargetBearingAndDistance(targetPosition)
-
-        if targetDistance < self.distanceTolerance:
-            return True
-        else:
-            velocityApplied = numpy.clip(
-                self.linearVelocityKP * targetDistance,
-                0.0,
-                self.maxLinearVelocity
-            )
-
-            deltaTheta = targetBearing - self.allocentricPose[2]
-            deltaTheta = numpy.arctan2(numpy.sin(deltaTheta), numpy.cos(deltaTheta))
-
-            leftWheelAngularVelocity, rightWheelAngularVelocity = self._calculateAppliedAngularVelocities(
-                deltaTheta = deltaTheta if abs(deltaTheta) > self.angleTolerance else 0.0,
-                appliedVelocity = velocityApplied
-            )
-            return False
-
-    def step(self):
-        self.GFTC.step()
-        self._updateAllocentricPose()
-
-        if self.GFTC.checkPath(self.pathIndex):
-            self.robotState = RobotState.PATH_BLOCKED
-
-        if self.robotState == RobotState.INIT:
-            pass
-        elif self.robotState == RobotState.ROTATE:
-            isHeadingAligned = self._rotate(self.currentTargetPosition)
-            if isHeadingAligned:
-                self.robotState = RobotState.DRIVE
-        elif self.robotState == RobotState.DRIVE:
-            isAtCurrentTargetPosition = self._drive(self.currentTargetPosition)
-            if isAtCurrentTargetPosition:
-                if len(self.path) == 0:
-                    self.robotState = RobotState.FINISHED
-                else:
-                    self._currentTargetPosition = self.path.dequeue()
-                    self.robotState = RobotState.ROTATE
-        elif self.robotState == RobotState.PATH_BLOCKED:
-            leftWheelAngularVelocity  = 0.0
-            rightWheelAngularVelocity = 0.0
-
-            # EMERGENCY STOP: set angular velocities, of all motors, to 0.
-
-            self.pathQueue.clear()
-            self.navigateTo(self.finalTargetPosition)
-            self.robotState = RobotState.ROTATE
 
 class Supervisor:
     MANUAL_MODE_CODE          = 304
-    AUTONOMOUS_MODE_CODE      = 307
+    SAVE_DATA_CODE            = 307
     CONNECTION_RETRY_ATTEMPTS = 5
+    CONTROL_PERIOD            = 0.05 # 20 Hz
+    INJECTION_PERIOD          = 0.02 # 50 Hz
+    SNAPSHOT_PERIOD           = 1.0 # 1 Hz
+    BAUD_RATE           = 9600
+    SERIAL_READ_TIMEOUT = 0.05
+    SERIAL_POLL_PERIOD  = 0.005
+    MAX_RX_BUFFER       = 8192
+
+    # encoder polarity is inverted (god knows why)
+    ENCODER_SIGN = -1d
+
+    MODEL_DT_MS        = 1.0
+    TIME_SCALE         = 1.0
+    MAX_CATCHUP_STEPS  = 50
+
+    WHEEL_RADIUS         = 0.045 # m
+    HALF_WIDTH           = 0.1225  # m  (l_x)
+    HALF_LENGTH          = 0.1275  # m  (l_y)
+    TICKS_PER_REVOLUTION = 660  # output shaft: CPR x gearing x quadrature (calibrated by manually minimising pose error against a known distance)
 
     TELEMETRY_PATTERN = re.compile(
-        r'DATA:HDG:([\d\.]+):ENC_FR_DELTA:([-\d]+):ENC_FL_DELTA:([-\d]+):'
-        r'ENC_RR_DELTA:([-\d]+):ENC_RL_DELTA:([-\d]+)'
+        r'DATA:HDG:([+-]?\d+(?:\.\d+)?):ENC_FR_DELTA:([+-]?\d+):'
+        r'ENC_FL_DELTA:([+-]?\d+):ENC_RR_DELTA:([+-]?\d+):'
+        r'ENC_RL_DELTA:([+-]?\d+)'
     )
 
     def __init__(self):
-        self.joystick = Joystick(maxRetryAttempts = Supervisor.CONNECTION_RETRY_ATTEMPTS)
-        self.camera   = Camera()
+        self.joystick = Joystick(maxRetryAttempts=Supervisor.CONNECTION_RETRY_ATTEMPTS)
 
         self.currentMode     = "idle"
         self.lastCommandTime = 0.0
         self.lastCommandSent = ""
 
-        self.ser               = None
-        self.latestAzimuth     = None
-        self.latestEncoderFlow = None
+        self.ser           = None
+        self.latestHeading = None       # radians
 
-        self._serialReaderThread = None
+        self._serialReaderThread          = None
+        self._lidarThread                 = None
+        self._spatialMapInjectionThread   = None
 
-        self.mish = MISHController()
+        self._rxBuffer   = b""
+        self._modelSteps = 0
+        self._telemetryAccepted = 0
+        self._telemetryRejected = 0
+        self._lastRejectWarning = 0.0
 
         self.stopEvent = threading.Event()
 
+        self.odometer  = Odometer(
+            wheelRadius        = Supervisor.WHEEL_RADIUS,
+            halfWidth          = Supervisor.HALF_WIDTH,
+            halfLength         = Supervisor.HALF_LENGTH,
+            ticksPerRevolution = Supervisor.TICKS_PER_REVOLUTION,
+        )
+        self._poseLock    = threading.Lock()
+
+        self.lidar = LIDARInterface(
+            connectionRetryAmount = Supervisor.CONNECTION_RETRY_ATTEMPTS,
+            stopEvent             = self.stopEvent,
+        )
+        self.spatialMap = TrigSpatialMap()
 
     def _findArduinoPort(self):
-        ports = glob.glob("/dev/ttyACM*")
-        if not ports:
-            return None
-        for port in ports:
+        for port in glob.glob("/dev/ttyACM*"):
             try:
-                s = serial.Serial(port, 9600, timeout=2)
+                s = serial.Serial(port, Supervisor.BAUD_RATE, timeout=2)
                 s.close()
                 return port
             except Exception as e:
@@ -211,37 +95,86 @@ class Supervisor:
 
     def _connectArduino(self):
         print("! Searching for Arduino on serial port /dev/ttyACM*...")
-        for i in range(self.CONNECTION_RETRY_ATTEMPTS):
+        for _ in range(self.CONNECTION_RETRY_ATTEMPTS):
             port = self._findArduinoPort()
             if not port:
                 print("    - Cannot find Arduino. Retrying")
                 time.sleep(2)
                 continue
             try:
-                ser = serial.Serial(port, 9600, timeout=2)
-                print("    - Connected to Arduino on {}".format(port))
+                ser = serial.Serial(port, Supervisor.BAUD_RATE, timeout=2)
+                print("    - Connected to Arduino on {} at {} baud".format(
+                    port, Supervisor.BAUD_RATE))
                 time.sleep(2)
+                ser.timeout = Supervisor.SERIAL_READ_TIMEOUT
+                ser.reset_input_buffer()
                 return ser
             except Exception as e:
                 print("Failed to open Arduino on {}: {}".format(port, e))
                 time.sleep(2)
-        raise RuntimeError(f"! ERROR: could not connect to Ardunio after {self.CONNECTION_RETRY_ATTEMPTS} attempts")
+        raise RuntimeError(
+            "! ERROR: could not connect to Arduino after {} attempts".format(
+                self.CONNECTION_RETRY_ATTEMPTS))
+
+    def _handleTelemetryLine(self, line):
+        m = Supervisor.TELEMETRY_PATTERN.match(line)
+        if m is None:
+            self._telemetryRejected += 1
+            now = time.time()
+            if now - self._lastRejectWarning > 5.0:
+                total = self._telemetryAccepted + self._telemetryRejected
+                print("[TELEMETRY] {} / {} lines rejected ({:.1f}%). "
+                      "Last: {!r}".format(self._telemetryRejected, total,
+                                          100.0 * self._telemetryRejected / max(1, total),
+                                          line[:80]))
+                self._lastRejectWarning = now
+            return
+
+        try:
+            heading = numpy.radians(float(m.group(1)))
+            # NOTE: rear wheel encoders are disregarded due to them being disconnected
+            fr, fl, _, _ = (int(m.group(i)) for i in (2, 3, 4, 5))
+        except ValueError:
+            self._telemetryRejected += 1
+            return
+
+        s = Supervisor.ENCODER_SIGN
+        fr = fr * -1
+        fl = fl * -1
+
+        self._telemetryAccepted += 1
+        with self._poseLock:
+            self.odometer.update(fl, fr, heading)
+            self.latestHeading = heading
 
     def _readSerial(self):
         while not self.stopEvent.is_set():
             try:
-                if self.ser and self.ser.in_waiting > 0:
-                    line = self.ser.readline().decode().strip()
-                    m = Supervisor.TELEMETRY_PATTERN.match(line)
-                    if m:
-                        self.latestAzimuth = float(m.group(1))
-                        fr, fl, rr, rl = (int(m.group(i)) for i in (2, 3, 4, 5))
-                        self.latestEncoderFlow = (fr + fl + rr + rl) / 4.0
-                        print("[TELEMETRY] AZI {:.2f}  FR {}  FL {}  RR {}  RL {}".format(self.latestAzimuth, fr, fl, rr,
-                                                                                          rl))
+                if self.ser is None:
+                    time.sleep(0.05)
+                    continue
+
+                waiting = self.ser.in_waiting
+                chunk = self.ser.read(waiting if waiting > 0 else 1)
+                if chunk:
+                    self._rxBuffer += chunk
+
+                if len(self._rxBuffer) > Supervisor.MAX_RX_BUFFER:
+                    self._rxBuffer = b""
+
+                while b"\n" in self._rxBuffer:
+                    raw, self._rxBuffer = self._rxBuffer.split(b"\n", 1)
+                    line = raw.decode(errors="replace").strip()
+                    if line:
+                        self._handleTelemetryLine(line)
+
+                time.sleep(Supervisor.SERIAL_POLL_PERIOD)
+
+            except (serial.SerialException, OSError) as e:
+                self.stopAll("_readSerial serial failure: {}".format(e))
             except Exception as e:
-                self.stopAll(f"_readSerial failed: {e}")
-            time.sleep(0.05)
+                print("[SERIAL] non-fatal error: {}".format(e))
+                time.sleep(0.05)
 
     def _writeCommand(self, lin, strafe, rot):
         now = time.time()
@@ -251,25 +184,80 @@ class Supervisor:
             self.lastCommandSent = cmd
             self.lastCommandTime = now
 
+    def _injectionLoop(self):
+        lastInject = 0.0
+        startTime = time.time()
+        self._modelSteps = 0
+        lastLagWarning = 0.0
+
+        while not self.stopEvent.is_set():
+            try:
+                now = time.time()
+
+                if now - lastInject >= self.INJECTION_PERIOD:
+                    azimuthVec, distanceVec = self.lidar.readCache()
+                    with self._poseLock:
+                        x, y, heading = self.odometer.getPose()
+
+                    if (x is None or y is None or heading is None
+                            or azimuthVec is None or distanceVec is None):
+                        pass
+                    else:
+                        self.spatialMap.gaussianInject(
+                            azimuthVec=azimuthVec, distanceVec=distanceVec,
+                            heading=heading, robotX=x, robotY=y, sigma=0.05)
+                    lastInject = now
+
+                targetSteps = int((now - startTime) * 1000.0
+                                  * self.TIME_SCALE / self.MODEL_DT_MS)
+                budget = min(targetSteps - self._modelSteps,
+                             self.MAX_CATCHUP_STEPS)
+
+                if budget <= 0:
+                    time.sleep(0.0005)
+                    continue
+
+                for _ in range(budget):
+                    self.spatialMap.step()
+                self._modelSteps += budget
+
+                if (targetSteps - self._modelSteps > 500
+                        and now - lastLagWarning > 5.0):
+                    print("[TIMING] model time is {} steps behind wall clock; "
+                          "reduce TIME_SCALE or the map dynamics will run "
+                          "slow".format(targetSteps - self._modelSteps))
+                    lastLagWarning = now
+
+            except Exception as e:
+                self.stopAll("_injectionLoop failed: {}".format(e))
+
     def start(self):
         try:
             self.ser = self._connectArduino()
         except Exception as e:
-            self.stopAll(f"Arduino connection failed: {e}")
+            self.stopAll("Arduino connection failed: {}".format(e))
             raise
         try:
             self.joystick.connect()
         except Exception as e:
-            self.stopAll(f"Joystick connection failed: {e}")
-            raise
-        try:
-            self.camera.start()
-        except Exception as e:
-            self.stopAll(f"Camera connection failed: {e}")
+            self.stopAll("Joystick connection failed: {}".format(e))
             raise
 
-        self._serialReaderThread = threading.Thread(target=self._readSerial, daemon = True)
+        self._serialReaderThread = threading.Thread(
+            target=self._readSerial,
+            daemon=True
+        )
+        self._lidarThread = threading.Thread(
+            target=self.lidar.run,
+            daemon=True
+        )
+        self._spatialMapInjectionThread = threading.Thread(
+            target = self._injectionLoop,
+            daemon = True
+        )
         self._serialReaderThread.start()
+        self._lidarThread.start()
+        self._spatialMapInjectionThread.start()
 
         try:
             self.run()
@@ -280,13 +268,15 @@ class Supervisor:
         print("[SUPERVISOR] mode = idle")
         lastControllerConnectionTest = time.time()
         isJoystickConnected = True
-        lastAutonomousWarning = 0.0
+
+        viewer = SpatialMapViewer(
+            spatialMap = self.spatialMap,
+            host       = "10.0.0.1"
+        )
 
         while not self.stopEvent.is_set():
             deltaT = time.time() - lastControllerConnectionTest
             try:
-                iterationTime = time.time()
-
                 if deltaT > 1.0:
                     isJoystickConnected = self.joystick.isConnected()
                     lastControllerConnectionTest = time.time()
@@ -296,65 +286,65 @@ class Supervisor:
                         if code == self.MANUAL_MODE_CODE:
                             print("[SUPERVISOR] mode = manual")
                             self.currentMode = "manual"
-                        elif code == self.AUTONOMOUS_MODE_CODE:
-                            print("[SUPERVISOR] mode = autonomous")
-                            self.currentMode = "autonomous"
                 else:
                     self.currentMode = "idle"
 
-                leftX = self.joystick.getAxis(0)
-                leftY = -self.joystick.getAxis(1)
+                with self._poseLock:
+                    x, y, _ = self.odometer.getPose()
+                viewer.update(robotX=x, robotY=y)
+
+                leftX  = self.joystick.getAxis(0)
+                leftY  = -self.joystick.getAxis(1)
                 rightX = self.joystick.getAxis(2)
                 rightY = -self.joystick.getAxis(5)
 
                 forward = leftY + rightY
 
                 if self.currentMode == "manual":
-                    lin = forward / 127
+                    lin    = forward / 127
                     strafe = -leftX / 127
-                    rot = rightX / 127
-                elif self.currentMode == "autonomous":
-                    lin, strafe, rot = 0.0, 0.0, 0.0
-                    if self.mish is not None:
-                        try:
-                            distanceFrame = self.camera.getLatestDistanceFrame() if self.camera else None
-
-                            self.mish.GFTC.setHDInput(
-                                heading_rad = self.latestAzimuth * (numpy.pi / 180.0)
-                            )
-                            # FIGURE OUT HOW TO DIFFERENTIATE OBJECTS AND BOUNDARIES
-                            # - PWo must receive a varient of the distanceFrame which focuses on objects.
-                            # - PWb must receive a varient of the distanceFrame which focus on boundaries
-
-                            self.mish.step()
-                        except Exception as e:
-                            if iterationTime - lastAutonomousWarning >= 1.0:
-                                print("[AUTONOMOUS] mish.step() raised:", e)
-                                lastAutonomousWarning = iterationTime
+                    rot    = rightX / 127
+                elif self.currentMode == "save":
+                    print("[SUPERVISOR] saving complete. returning to manual mode")
+                    self.currentMode = "manual"
+                    lin = strafe = rot = 0.0
                 else:
-                    lin = 0.0
-                    strafe = 0.0
-                    rot = 0.0
+                    lin = strafe = rot = 0.0
 
+                # NOTE: due to modelling robot as having differential drive, strafe is disabled
                 self._writeCommand(lin, strafe, rot)
 
             except Exception as e:
-                self.stopAll(f"Supervisor.run() failed: {e}")
+                self.stopAll("Supervisor.run() failed: {}".format(e))
+
+            time.sleep(self.CONTROL_PERIOD)
 
     def stopAll(self, reason):
         if self.stopEvent.is_set():
             return
-        print(f"! FATAL ERROR ENCOUNTERED: {reason}")
-        self.stopEvent.set()
+        print("! FATAL ERROR ENCOUNTERED: {}".format(reason))
 
-        if self.camera:
-            self.camera.stop()
+        total = self._telemetryAccepted + self._telemetryRejected
+        if total:
+            print("  telemetry: {} accepted, {} rejected ({:.1f}% loss)".format(
+                self._telemetryAccepted, self._telemetryRejected,
+                100.0 * self._telemetryRejected / total))
+
+        self.stopEvent.set()
 
         if self._serialReaderThread and self._serialReaderThread is not threading.current_thread():
             self._serialReaderThread.join(timeout=1.0)
 
+        if self._lidarThread and self._lidarThread is not threading.current_thread():
+            self._lidarThread.join(timeout=1.0)
+
+        if self._spatialMapInjectionThread and self._spatialMapInjectionThread is not threading.current_thread():
+            self._spatialMapInjectionThread.join(timeout=1.0)
+
         if self.ser:
             self.ser.close()
+        self.lidar.close()
+
 
 if __name__ == "__main__":
     supervisor = Supervisor()

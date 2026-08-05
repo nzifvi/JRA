@@ -1,15 +1,12 @@
 import time
 import evdev
 import select
-import threading
-from SignalSystem import BiDirectionalChannel
 
 class Joystick:
-    def __init__(self, channel:BiDirectionalChannel, maxRetryAttempts, targetName = "Logitech"):
+    def __init__(self, maxRetryAttempts, targetName = "Logitech"):
         self.targetName = targetName
         self.device     = None
         self.maxRetryAttempts = maxRetryAttempts
-        self.channel = channel
 
     def connect(self):
         print(f"! Searching for {self.targetName} device")
