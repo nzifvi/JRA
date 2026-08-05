@@ -16,3 +16,5 @@ $$V(t+1) = \frac{-(V(t) - V_{\text{rest}}) + I_{\text{syn}} - I_{\text{inh}}}{\t
 $$V(t+1) \mathrel{+}= \frac{-(V(t) - V_{\text{rest}}) + I_{\text{syn}} + \text{latchGate}\cdot I_{\text{latch}}}{\tau_M}\\Delta t$$
 
 ## SpikeSourceArray Neuron Population
+
+# Wave Propagation and Path Construction
