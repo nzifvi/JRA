@@ -7,4 +7,4 @@
 ## SpatialMap Neuron Population
 $$V(t+1) = \frac{(-(V(t) - V_{rest}) + I_{syn} - I_{inh}}{\tau_{M}}dt$$
 ## MemoryMap Neuron Population
-
+$$V(t+1) = \frac{(-(V(t) - V_{rest}) + I_{syn} + latch{gate}latch_{in}{\tau_{M}}dt$$
