@@ -5,6 +5,7 @@ Three neuron populations exist within the model: SpatialMap, MemoryMap, and Spik
 ## SpatialMap Neuron Population
 The SpatialMap neuron population is assigned with the task of representing the environment, about the robot, in a temporally dynamic manner. The level of inhibitory current, $I_{\text{inh}}$, within a SpatialMap neuron encodes the presence or absence of an object. For example, higher levels of inhibitory current indicate the presence of an object in the (x, y) coordinate. A constant decay is applied to the inhibitory current of a neuron: decreasing the accumulated value per step of the model. This results in injections to the model, in the absence of persistence, decaying over time: achieving
 temporally dynamic behaviour.
+
 $$V(t+1) = \frac{-(V(t) - V_{\text{rest}}) + I_{\text{syn}} - I_{\text{inh}}}{\tau_M}\ \Delta t$$
 
 ## MemoryMap Neuron Population
