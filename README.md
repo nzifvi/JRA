@@ -5,6 +5,6 @@
 
 # Neuron Populations
 ## SpatialMap Neuron Population
-$$V(t+1) = \bigg(\bigg)$$
+$$V(t+1) = \frac{}{}dt
 ## MemoryMap Neuron Population
 
