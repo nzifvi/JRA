@@ -29,7 +29,7 @@ class Supervisor:
     MAX_RX_BUFFER       = 8192
 
     # encoder polarity is inverted (god knows why)
-    ENCODER_SIGN = -1d
+    ENCODER_SIGN = -1
 
     MODEL_DT_MS        = 1.0
     TIME_SCALE         = 1.0
