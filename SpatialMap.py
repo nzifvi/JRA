@@ -485,7 +485,7 @@ class TrigSpatialMap:
 
         if sourceKey not in self._indexTable:
             raise ValueError(
-                f"! ERROR: robot at (x={robotX}, y={robotY}) is outside spatial map bounds"
+                f"! ERROR: robot position, (x={robotX}, y={robotY}), is outside spatial map bounds"
             )
 
         i = self._indexTable[sourceKey]
